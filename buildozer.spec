@@ -1,11 +1,13 @@
 [app]
 title = MidONe Scanner
+android.accept_sdk_license = True
 package.name = midonescanner
 package.domain = org.midone
 source.dir = .
 source.include_exts = py,png,jpg,kv,json
 version = 1.0.2
 requirements = python3,kivy==2.3.0,plyer,requests
+
 
 # Android UI adjustments
 orientation = portrait
