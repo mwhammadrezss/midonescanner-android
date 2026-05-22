@@ -1,1 +1,58 @@
+name: Build MidONe APK
 
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            python3-pip build-essential git python3 python3-dev \
+            ffmpeg libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
+            libportmidi-dev libswscale-dev libavformat-dev libavcodec-dev zlib1g-dev \
+            libgstreamer1.0-dev gstreamer1.0-plugins-base openjdk-17-jdk unzip zip \
+            autoconf automake libtool pkg-config
+
+      - name: Install Python dependencies
+        run: pip install buildozer cython kivy
+
+      - name: Build APK
+        run: yes | buildozer android debug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: MidONe-Scanner-APK
+          path: .buildozer/android/platform/build-arm64-v8a/dists/midone_scanner/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Also find and copy APK
+        run: |
+          APK=$(find . -name "*.apk" 2>/dev/null | head -1)
+          if [ -n "$APK" ]; then
+            cp "$APK" MidONe_Scanner.apk
+            echo "✅ APK: $APK"
+          fi
+
+      - name: Upload final APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: MidONe_Scanner_Final
+          path: MidONe_Scanner.apk
+          retention-days: 7
