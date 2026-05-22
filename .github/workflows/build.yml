@@ -8,40 +8,36 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # تغییر حیاتی: استفاده از اوبونتو ۲۲ به جای آخرین نسخه برای سازگاری کامل با بیلدوزر
+    runs-on: ubuntu-22.04
 
     steps:
     - name: Checkout Cloud Code
       uses: actions/checkout@v4
 
-    # قفل کردن پایتون روی نسخه پایدار 3.11
     - name: Set up Python 3.11
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
-    # پاکسازی کش‌های قدیمی برای اعمال تغییرات جدید سایفون
     - name: Clear Buildozer Cache
       run: |
         rm -rf .buildozer/
         rm -rf ~/.buildozer/
 
-    # نصب پیش‌نیازهای لینوکس به همراه ابزار ccache برای کمک به کمپایلر
+    # نصب پیش‌نیازها + اضافه شدن virtualenv و تنظیم مجدد cython
     - name: Install System Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev libsqlite3-dev sqlite3 bzip2 libbz2-dev ccache
-        pip install --upgrade pip setuptools wheel
-        pip install "cython<3.0.0" buildozer
+        sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev libsqlite3-dev sqlite3 bzip2 libbz2-dev cmake ccache
+        pip install --upgrade pip setuptools wheel virtualenv
+        pip install buildozer cython
 
-    # اجرای بیلدوزر در محیط غیرتعاملی
+    # اجرای مستقیم بیلدوزر (دستور yes حذف شد تا اگر خطایی بود دقیقاً مشخص شود)
     - name: Build Android App with Buildozer
-      env:
-        TERM: xterm
       run: |
-        yes | buildozer android debug
+        buildozer android debug
 
-    # آپلود فایل نهایی APK
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
