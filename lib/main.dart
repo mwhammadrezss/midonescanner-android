@@ -11,23 +11,43 @@ void main() {
   runApp(const MidOneScannerApp());
 }
 
-// ─── INCY-inspired Forest Green Theme ──────────────────────────────────────
+// ─── Forest Green Theme (INCY-inspired) ────────────────────────────────────
 
-const bgColor      = Color(0xFF0A1A0F);   // پس‌زمینه اصلی - سبز خیلی تیره
-const cardColor    = Color(0xFF112216);   // کارت اول
-const card2Color   = Color(0xFF0D1A11);   // نوار بالا/پایین
-const cardInner    = Color(0xFF1A3020);   // کارت داخلی
-const accentLime   = Color(0xFFC6F135);   // لایم سبز - اکسنت اصلی
-const accentLime2  = Color(0xFFA8D400);   // لایم تیره‌تر - progress
+const bgColor      = Color(0xFF0A1A0F);
+const cardColor    = Color(0xFF112216);
+const card2Color   = Color(0xFF0D1A11);
+const cardInner    = Color(0xFF1A3020);
+const accentLime   = Color(0xFFC6F135);
+const accentLime2  = Color(0xFFA8D400);
 const textPrimary  = Color(0xFFFFFFFF);
-const textSecond   = Color(0xFF8A9E8E);   // متن ثانویه
-const iconBg       = Color(0xFF1E3525);   // پس‌زمینه دکمه‌های آیکون
-const borderColor  = Color(0xFF2A4A30);   // بوردر ظریف
-
-// رنگ‌های وضعیت
+const textSecond   = Color(0xFF8A9E8E);
+const iconBg       = Color(0xFF1E3525);
+const borderColor  = Color(0xFF2A4A30);
 const statusGreen  = Color(0xFF1A3A1E);
 const statusRed    = Color(0xFF3A1A1A);
 const statusOrange = Color(0xFF3A2A1A);
+
+// همه SNI های موجود با نام نمایشی
+const List<Map<String, String>> kAllSniOptions = [
+  {'label': 'Cloudflare — speed.cloudflare.com', 'sni': 'speed.cloudflare.com'},
+  {'label': 'Cloudflare — cloudflare.com',       'sni': 'cloudflare.com'},
+  {'label': 'Akamai — a248.e.akamai.net',        'sni': 'a248.e.akamai.net'},
+  {'label': 'Akamai — a77.net.akamai.net',       'sni': 'a77.net.akamai.net'},
+  {'label': 'Akamai — a104.net.akamai.net',      'sni': 'a104.net.akamai.net'},
+  {'label': 'Akamai — a184.net.akamai.net',      'sni': 'a184.net.akamai.net'},
+  {'label': 'Google — google.com',               'sni': 'google.com'},
+  {'label': 'Google — www.google.com',           'sni': 'www.google.com'},
+  {'label': 'Google — fonts.googleapis.com',     'sni': 'fonts.googleapis.com'},
+  {'label': 'Amazon — aws.amazon.com',           'sni': 'aws.amazon.com'},
+  {'label': 'Amazon — d1.cloudfront.net',        'sni': 'd1.cloudfront.net'},
+  {'label': 'Azure — ajax.aspnetcdn.com',        'sni': 'ajax.aspnetcdn.com'},
+  {'label': 'Fastly — global.fastly.net',        'sni': 'global.fastly.net'},
+  {'label': 'Iranian — aparat.com',              'sni': 'aparat.com'},
+  {'label': 'Iranian — snapp.ir',                'sni': 'snapp.ir'},
+  {'label': 'Iranian — digikala.com',            'sni': 'digikala.com'},
+  {'label': 'Iranian — telewebion.com',          'sni': 'telewebion.com'},
+  {'label': 'Iranian — varzesh3.com',            'sni': 'varzesh3.com'},
+];
 
 Color gradeColor(ScanResult r) {
   if (r.throttled) return const Color(0xFFFF5252);
@@ -56,9 +76,7 @@ class MidOneScannerApp extends StatelessWidget {
           secondary: accentLime2,
           surface: cardColor,
         ),
-        textTheme: GoogleFonts.interTextTheme(
-          ThemeData.dark().textTheme,
-        ),
+        textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
       ),
       home: const HomeScreen(),
     );
@@ -89,9 +107,15 @@ class _HomeScreenState extends State<HomeScreen> {
   String _sortBy = 'score';
   bool _filterThrottled = false;
 
+  // SNI selector برای Auto-SNI
+  Set<String> _selectedSnis = Set.from(kAllSniOptions.map((e) => e['sni']!));
+
   void _startScan() {
     final ips = ScannerEngine.parseIps(_ipController.text);
     if (ips.isEmpty) { _showSnack('No valid IPs found!'); return; }
+    if (_mode == 2 && _selectedSnis.isEmpty) {
+      _showSnack('Please select at least one SNI!'); return;
+    }
     setState(() {
       _scanning = true;
       _results = [];
@@ -103,7 +127,13 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     final scan = _mode == 1
         ? _engine.scanMode1(ips: ips, onProgress: _onProgress, onResult: _onResult, onDone: _onDone)
-        : _engine.scanMode2(ips: ips, onProgress: _onProgress, onResult: _onResult, onDone: _onDone);
+        : _engine.scanMode2(
+            ips: ips,
+            onProgress: _onProgress,
+            onResult: _onResult,
+            onDone: _onDone,
+            customSnis: _selectedSnis.toList(),
+          );
     scan.catchError((e) { if (mounted) setState(() => _scanning = false); });
   }
 
@@ -115,8 +145,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _onProgress(int done, int total) {
     if (!mounted) return;
     setState(() {
-      _done = done;
-      _total = total;
+      _done = done; _total = total;
       _statusText = 'Scanning ${(done / total * 100).round()}%';
     });
   }
@@ -129,8 +158,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _onDone(List<ScanResult> results) {
     if (!mounted) return;
     setState(() {
-      _results = results;
-      _scanning = false;
+      _results = results; _scanning = false;
       _statusText = 'Done! ${results.length} results';
     });
     if (results.isNotEmpty) {
@@ -145,8 +173,7 @@ class _HomeScreenState extends State<HomeScreen> {
     var list = [..._results];
     if (_filterThrottled) list = list.where((r) => !r.throttled).toList();
     list.sort((a, b) => _sortBy == 'score'
-        ? b.score.compareTo(a.score)
-        : b.speed.compareTo(a.speed));
+        ? b.score.compareTo(a.score) : b.speed.compareTo(a.speed));
     return list;
   }
 
@@ -182,9 +209,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       await file.writeAsString(buf.toString());
       _showSnack('✓ Saved: scan_$ts.txt');
-    } catch (e) {
-      _showSnack('Save error: $e');
-    }
+    } catch (e) { _showSnack('Save error: $e'); }
   }
 
   void _showSnack(String msg) {
@@ -219,23 +244,25 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildTopBar() {
     return Container(
       color: card2Color,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
       child: Row(
         children: [
+          // آیکون اپ در هدر
+          Image.asset('assets/icons/app_icon.png', width: 36, height: 36),
+          const SizedBox(width: 10),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('MidONe Scanner',
                   style: GoogleFonts.inter(
-                      color: accentLime,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 20,
-                      letterSpacing: -0.5)),
-              Text('Shir Khorshid CDN Scanner',
+                      color: accentLime, fontWeight: FontWeight.w800,
+                      fontSize: 18, letterSpacing: -0.5)),
+              Text('v6.2',
                   style: GoogleFonts.inter(color: textSecond, fontSize: 11)),
             ],
           ),
           const Spacer(),
+          // دکمه تلگرام با آیکون سبز
           GestureDetector(
             onTap: () async {
               final uri = Uri.parse('https://t.me/mmdrlx');
@@ -252,8 +279,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               child: Row(
                 children: [
-                  const Text('✈️', style: TextStyle(fontSize: 13)),
-                  const SizedBox(width: 4),
+                  Image.asset('assets/icons/telegram_icon.png', width: 16, height: 16),
+                  const SizedBox(width: 5),
                   Text('@mmdrlx',
                       style: GoogleFonts.inter(
                           color: accentLime, fontSize: 12,
@@ -276,6 +303,11 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           _buildModeCard(),
           const SizedBox(height: 12),
+          // SNI Selector فقط وقتی Auto-SNI انتخاب شده
+          if (_mode == 2) ...[
+            _buildSniSelector(),
+            const SizedBox(height: 12),
+          ],
           _buildInputCard(),
           const SizedBox(height: 12),
           _buildScanButton(),
@@ -306,7 +338,7 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Expanded(child: _modeBtn(1, 'Simple', 'Fast · SNI: google.com')),
               const SizedBox(width: 10),
-              Expanded(child: _modeBtn(2, 'Auto-SNI', 'CDN detect + all SNIs')),
+              Expanded(child: _modeBtn(2, 'Auto-SNI', 'CDN detect + custom SNIs')),
             ],
           ),
         ],
@@ -324,8 +356,7 @@ class _HomeScreenState extends State<HomeScreen> {
         decoration: BoxDecoration(
           color: active ? accentLime.withOpacity(0.12) : iconBg,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-              color: active ? accentLime : borderColor,
+          border: Border.all(color: active ? accentLime : borderColor,
               width: active ? 1.5 : 1),
         ),
         child: Column(
@@ -333,14 +364,108 @@ class _HomeScreenState extends State<HomeScreen> {
             Text(title,
                 style: GoogleFonts.inter(
                     color: active ? accentLime : textPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14)),
+                    fontWeight: FontWeight.w700, fontSize: 14)),
             const SizedBox(height: 4),
             Text(sub,
                 style: GoogleFonts.inter(color: textSecond, fontSize: 10),
                 textAlign: TextAlign.center),
           ],
         ),
+      ),
+    );
+  }
+
+  // ── SNI Selector ─────────────────────────────────────────────────────────
+
+  Widget _buildSniSelector() {
+    final allSelected = _selectedSnis.length == kAllSniOptions.length;
+    final noneSelected = _selectedSnis.isEmpty;
+
+    return _card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('SNI SELECTION',
+                  style: GoogleFonts.inter(
+                      color: textSecond, fontWeight: FontWeight.w700,
+                      fontSize: 11, letterSpacing: 1.2)),
+              const Spacer(),
+              // دکمه ALL
+              _miniBtn('ALL', () {
+                setState(() {
+                  _selectedSnis = Set.from(kAllSniOptions.map((e) => e['sni']!));
+                });
+              }, isAccent: allSelected),
+              const SizedBox(width: 6),
+              // دکمه NONE
+              _miniBtn('NONE', () {
+                setState(() => _selectedSnis = {});
+              }, isDestructive: noneSelected),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text('${_selectedSnis.length} of ${kAllSniOptions.length} selected',
+              style: GoogleFonts.inter(color: textSecond, fontSize: 11)),
+          const SizedBox(height: 10),
+          // لیست SNI ها
+          ...kAllSniOptions.map((item) {
+            final sni = item['sni']!;
+            final label = item['label']!;
+            final selected = _selectedSnis.contains(sni);
+            return GestureDetector(
+              onTap: () {
+                setState(() {
+                  if (selected) {
+                    _selectedSnis.remove(sni);
+                  } else {
+                    _selectedSnis.add(sni);
+                  }
+                });
+              },
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: selected ? accentLime.withOpacity(0.08) : card2Color,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                      color: selected ? accentLime.withOpacity(0.4) : borderColor),
+                ),
+                child: Row(
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      width: 18, height: 18,
+                      decoration: BoxDecoration(
+                        color: selected ? accentLime : Colors.transparent,
+                        borderRadius: BorderRadius.circular(5),
+                        border: Border.all(
+                            color: selected ? accentLime : textSecond,
+                            width: 1.5),
+                      ),
+                      child: selected
+                          ? const Icon(Icons.check_rounded,
+                              size: 12, color: Color(0xFF0A1A0F))
+                          : null,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(label,
+                          style: GoogleFonts.inter(
+                              color: selected ? textPrimary : textSecond,
+                              fontSize: 12,
+                              fontWeight: selected
+                                  ? FontWeight.w600
+                                  : FontWeight.normal)),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+        ],
       ),
     );
   }
@@ -361,7 +486,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 final data = await Clipboard.getData('text/plain');
                 if (data?.text != null) {
                   final cur = _ipController.text;
-                  _ipController.text = cur.isEmpty ? data!.text! : '$cur\n${data!.text!}';
+                  _ipController.text =
+                      cur.isEmpty ? data!.text! : '$cur\n${data!.text!}';
                 }
               }),
               const SizedBox(width: 8),
@@ -379,17 +505,14 @@ class _HomeScreenState extends State<HomeScreen> {
               filled: true,
               fillColor: card2Color,
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none),
               focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: accentLime, width: 1.5),
-              ),
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: accentLime, width: 1.5)),
               enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: borderColor, width: 1),
-              ),
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: borderColor, width: 1)),
               contentPadding: const EdgeInsets.all(14),
             ),
           ),
@@ -400,34 +523,27 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildScanButton() {
     return SizedBox(
-      width: double.infinity,
-      height: 54,
+      width: double.infinity, height: 54,
       child: ElevatedButton(
         onPressed: _scanning ? _stopScan : _startScan,
         style: ElevatedButton.styleFrom(
-          backgroundColor: _scanning
-              ? const Color(0xFF3A1A1A)
-              : accentLime,
+          backgroundColor: _scanning ? const Color(0xFF3A1A1A) : accentLime,
           foregroundColor: _scanning ? const Color(0xFFFF5252) : bgColor,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           elevation: 0,
           side: BorderSide(
-            color: _scanning ? const Color(0xFFFF5252) : Colors.transparent,
-            width: 1.5,
-          ),
+              color: _scanning ? const Color(0xFFFF5252) : Colors.transparent,
+              width: 1.5),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(_scanning ? Icons.stop_rounded : Icons.radar_rounded, size: 20),
             const SizedBox(width: 8),
-            Text(
-              _scanning ? 'STOP SCAN' : 'START SCAN',
-              style: GoogleFonts.inter(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 15,
-                  letterSpacing: 0.5),
-            ),
+            Text(_scanning ? 'STOP SCAN' : 'START SCAN',
+                style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w800, fontSize: 15,
+                    letterSpacing: 0.5)),
           ],
         ),
       ),
@@ -441,8 +557,7 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           Row(
             children: [
-              Icon(Icons.circle,
-                  size: 8,
+              Icon(Icons.circle, size: 8,
                   color: _scanning ? accentLime : textSecond),
               const SizedBox(width: 6),
               Text(_statusText,
@@ -488,8 +603,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12),
       decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(14),
+          color: bg, borderRadius: BorderRadius.circular(14),
           border: Border.all(color: accent.withOpacity(0.25))),
       child: Column(
         children: [
@@ -497,8 +611,7 @@ class _HomeScreenState extends State<HomeScreen> {
               style: GoogleFonts.inter(
                   color: accent, fontWeight: FontWeight.w800, fontSize: 20)),
           const SizedBox(height: 2),
-          Text(label,
-              style: GoogleFonts.inter(color: textSecond, fontSize: 11)),
+          Text(label, style: GoogleFonts.inter(color: textSecond, fontSize: 11)),
         ],
       ),
     );
@@ -506,8 +619,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildViewResultsButton() {
     return SizedBox(
-      width: double.infinity,
-      height: 50,
+      width: double.infinity, height: 50,
       child: ElevatedButton(
         onPressed: () => setState(() => _tab = 1),
         style: ElevatedButton.styleFrom(
@@ -546,13 +658,11 @@ class _HomeScreenState extends State<HomeScreen> {
               Text('${list.length} results',
                   style: GoogleFonts.inter(color: textSecond, fontSize: 12)),
               const Spacer(),
-              _miniBtn(
-                  _sortBy == 'score' ? 'Score ↓' : 'Speed ↓', () {
+              _miniBtn(_sortBy == 'score' ? 'Score ↓' : 'Speed ↓', () {
                 setState(() => _sortBy = _sortBy == 'score' ? 'speed' : 'score');
               }),
               const SizedBox(width: 6),
-              _miniBtn(
-                  _filterThrottled ? 'No THR ✓' : 'No THR', () {
+              _miniBtn(_filterThrottled ? 'No THR ✓' : 'No THR', () {
                 setState(() => _filterThrottled = !_filterThrottled);
               }, isActive: _filterThrottled),
               const SizedBox(width: 6),
@@ -572,7 +682,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 12),
                       Text('No results yet.\nGo scan some IPs!',
                           textAlign: TextAlign.center,
-                          style: GoogleFonts.inter(color: textSecond, fontSize: 15)),
+                          style: GoogleFonts.inter(
+                              color: textSecond, fontSize: 15)),
                     ],
                   ))
               : ListView.builder(
@@ -614,8 +725,7 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(width: 8),
               Text(r.ip,
                   style: GoogleFonts.robotoMono(
-                      color: textPrimary,
-                      fontWeight: FontWeight.w700,
+                      color: textPrimary, fontWeight: FontWeight.w700,
                       fontSize: 15)),
               if (r.throttled) ...[
                 const SizedBox(width: 6),
@@ -639,8 +749,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     border: Border.all(color: gColor.withOpacity(0.4))),
                 child: Text(r.grade,
                     style: GoogleFonts.inter(
-                        color: gColor,
-                        fontWeight: FontWeight.w700, fontSize: 11)),
+                        color: gColor, fontWeight: FontWeight.w700,
+                        fontSize: 11)),
               ),
             ],
           ),
@@ -649,15 +759,18 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               _chip(Icons.bolt_rounded, '${r.speed} KB/s', accentLime),
               const SizedBox(width: 8),
-              _chip(Icons.timer_outlined, '${r.latency}ms', const Color(0xFF60AAFF)),
+              _chip(Icons.timer_outlined, '${r.latency}ms',
+                  const Color(0xFF60AAFF)),
               const SizedBox(width: 8),
-              _chip(Icons.star_rounded, '${r.score}', const Color(0xFFFFD060)),
+              _chip(Icons.star_rounded, '${r.score}',
+                  const Color(0xFFFFD060)),
             ],
           ),
           const SizedBox(height: 8),
           Row(
             children: [
-              _chip(Icons.language_rounded, r.cdn, const Color(0xFFFFAB40)),
+              _chip(Icons.language_rounded, r.cdn,
+                  const Color(0xFFFFAB40)),
               const SizedBox(width: 8),
               Expanded(
                 child: Text('SNI: ${r.sni}',
@@ -667,16 +780,14 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Row(
             children: List.generate(5, (i) => Padding(
               padding: const EdgeInsets.only(right: 3),
               child: Container(
                 width: 18, height: 5,
                 decoration: BoxDecoration(
-                  color: i < r.reliability
-                      ? accentLime2
-                      : iconBg,
+                  color: i < r.reliability ? accentLime2 : iconBg,
                   borderRadius: BorderRadius.circular(3),
                 ),
               ),
@@ -705,9 +816,7 @@ class _HomeScreenState extends State<HomeScreen> {
       {bool isDestructive = false, bool isActive = false, bool isAccent = false}) {
     Color color = textSecond;
     if (isDestructive) color = const Color(0xFFFF5252);
-    if (isActive) color = accentLime;
-    if (isAccent) color = accentLime;
-
+    if (isActive || isAccent) color = accentLime;
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -716,7 +825,9 @@ class _HomeScreenState extends State<HomeScreen> {
             color: isAccent ? accentLime.withOpacity(0.12) : iconBg,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-                color: isActive || isAccent ? color.withOpacity(0.5) : borderColor)),
+                color: isActive || isAccent
+                    ? color.withOpacity(0.5)
+                    : borderColor)),
         child: Text(label,
             style: GoogleFonts.inter(
                 color: color, fontSize: 11, fontWeight: FontWeight.w600)),
@@ -779,7 +890,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 style: GoogleFonts.inter(
                     color: active ? accentLime : textSecond,
                     fontSize: 11,
-                    fontWeight: active ? FontWeight.w700 : FontWeight.normal)),
+                    fontWeight:
+                        active ? FontWeight.w700 : FontWeight.normal)),
           ],
         ),
       ),
