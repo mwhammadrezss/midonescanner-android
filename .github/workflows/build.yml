@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android APK with Buildozer
 
 on:
   push:
@@ -8,37 +8,84 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
+    timeout-minutes: 90
 
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
 
-      - name: 💾 Cache buildozer global dir
+      - name: 🐍 Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 💾 Cache Buildozer
         uses: actions/cache@v4
         with:
-          path: .buildozer_global
-          key: buildozer-global-v1
+          path: |
+            .buildozer
+            ~/.buildozer
+          key: buildozer-v7-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            buildozer-v7-
 
-      - name: 🦁 Build with buildozer-action
-        uses: ArtemSBulgakov/buildozer-action@v1
-        id: buildozer
+      - name: 📦 Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git zip unzip openjdk-17-jdk \
+            autoconf libtool pkg-config \
+            zlib1g-dev libncurses5-dev libncursesw5-dev \
+            libtinfo5 cmake libffi-dev libssl-dev \
+            libgdbm-dev libnss3-dev libreadline-dev \
+            libsqlite3-dev sqlite3 bzip2 libbz2-dev \
+            libltdl-dev ccache patchelf
+          echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> "$GITHUB_ENV"
+          python -m pip install --upgrade pip setuptools wheel virtualenv
+          python -m pip install buildozer==1.5.0 cython==0.29.37
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: 🔨 Build APK
+        env:
+          BUILDOZER_WARN_ON_ROOT: 0
+          APP_ANDROID_ACCEPT_SDK_LICENSE: 1
+        run: |
+          set -o pipefail
+          java -version
+          buildozer --version
+          buildozer -v android debug 2>&1 | tee buildozer.log
+
+      - name: 📋 Show errors if failed
+        if: failure()
+        run: |
+          echo "## Buildozer log (last 120 lines)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -120 buildozer.log >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "## Error lines" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -E "ERROR|Error|FAILED|failed|Command failed|Traceback" buildozer.log | tail -60 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 📤 Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
         with:
-          command: android debug
-          workdir: .
-          buildozer_version: stable
+          name: buildozer-logs
+          path: buildozer.log
+          if-no-files-found: warn
 
-      - name: 📂 Find APK
-        run: find . -name "*.apk" | head -5
-
-      - name: 📤 Upload APK Artifact
+      - name: 📲 Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: MidONe-Scanner-SK-v6.1
-          path: ${{ steps.buildozer.outputs.filename }}
+          path: bin/*.apk
+          if-no-files-found: error
           retention-days: 90
 
       - name: 🚀 Create Release
+        if: success()
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v6.1-build${{ github.run_number }}
@@ -49,7 +96,7 @@ jobs:
 
             ### ✨ ویژگی‌ها
             - 🔍 CDN Auto-Detection (Cloudflare, Akamai, Google, Amazon, Azure, Fastly)
-            - 🧪 Reliability x5 — هر IP 5 بار تست
+            - 🧪 Reliability x5
             - ⚡ Real Bandwidth Test
             - 🚨 Throttle Detection
             - 📊 Advanced Scoring
@@ -58,5 +105,5 @@ jobs:
             - 🌙 Dark UI
 
             📣 [@mmdrlx](https://t.me/mmdrlx)
-          files: ${{ steps.buildozer.outputs.filename }}
+          files: bin/*.apk
           token: ${{ secrets.GITHUB_TOKEN }}
