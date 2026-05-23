@@ -1,0 +1,78 @@
+name: Build Flutter APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: ☕ Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 🐦 Setup Flutter 3.24.0
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: stable
+          cache: true
+
+      - name: 📦 Get packages
+        run: flutter pub get
+
+      - name: 🔍 Analyze
+        run: flutter analyze --no-fatal-infos
+        continue-on-error: true
+
+      - name: 🔨 Build APK
+        run: flutter build apk --release --no-shrink
+
+      - name: 📋 Show APK info
+        run: |
+          ls -lh build/app/outputs/flutter-apk/
+          echo "APK size: $(du -sh build/app/outputs/flutter-apk/app-release.apk | cut -f1)"
+
+      - name: 📲 Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MidONe-Scanner-SK-v6.1-Flutter
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 90
+
+      - name: 🚀 Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v6.1-flutter-build${{ github.run_number }}
+          name: "🦁 MidONe Scanner SK v6.1 Flutter (Build #${{ github.run_number }})"
+          body: |
+            ## 🦁 MidONe Scanner SK v6.1 — Flutter
+
+            اپ اندروید اسکنر شیر خورشید — ساخته شده با Flutter
+
+            ### ✨ ویژگی‌ها
+            - 🔍 CDN Auto-Detection (Cloudflare, Akamai, Google, Amazon, Azure, Fastly)
+            - 🧪 Reliability x5
+            - ⚡ Real Bandwidth Test
+            - 🚨 Throttle Detection
+            - 📊 Advanced Scoring
+            - 📋 Copy Top 5
+            - 💾 Save to File
+            - 🌙 Dark UI
+
+            ### 📱 نصب
+            APK رو دانلود کن → نصب کن
+
+            📣 [@mmdrlx](https://t.me/mmdrlx)
+          files: build/app/outputs/flutter-apk/app-release.apk
+          token: ${{ secrets.GITHUB_TOKEN }}
