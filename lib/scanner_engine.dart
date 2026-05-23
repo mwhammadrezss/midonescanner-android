@@ -185,7 +185,7 @@ class ScannerEngine {
         onBadCertificate: (_) => true,
         supportedProtocols: ['http/1.1'],
         timeout: timeout,
-      );
+      ).timeout(timeout, onTimeout: () => throw TimeoutException('TLS timeout'));
       return socket;
     } catch (_) {
       return null;
@@ -364,21 +364,23 @@ class ScannerEngine {
       try {
         if (!_stopped) {
           try {
-            final (ok, _) = await _stageTls(ip, sni);
-            if (ok && !_stopped) {
-              final bw = await _stageBandwidth(ip, sni, endpoint);
-              if (bw != null && !_stopped) {
-                final score = calcScore(bw['speed'], bw['latency'], bw['jitter'], bw['throttled'], 5);
-                final r = ScanResult(
-                  ip: ip, sni: sni, cdn: 'Auto',
-                  speed: bw['speed'], latency: bw['latency'],
-                  jitter: bw['jitter'], throttled: bw['throttled'],
-                  throttlePct: bw['throttlePct'], reliability: 5, score: score,
-                );
-                results.add(r);
-                onResult(r);
+            await Future(() async {
+              final (ok, _) = await _stageTls(ip, sni);
+              if (ok && !_stopped) {
+                final bw = await _stageBandwidth(ip, sni, endpoint);
+                if (bw != null && !_stopped) {
+                  final score = calcScore(bw['speed'], bw['latency'], bw['jitter'], bw['throttled'], 5);
+                  final r = ScanResult(
+                    ip: ip, sni: sni, cdn: 'Auto',
+                    speed: bw['speed'], latency: bw['latency'],
+                    jitter: bw['jitter'], throttled: bw['throttled'],
+                    throttlePct: bw['throttlePct'], reliability: 5, score: score,
+                  );
+                  results.add(r);
+                  onResult(r);
+                }
               }
-            }
+            }).timeout(const Duration(seconds: 20), onTimeout: () {});
           } catch (_) {}
         }
       } finally {
@@ -409,40 +411,42 @@ class ScannerEngine {
       try {
         if (!_stopped) {
           try {
-            List<String> sniList;
-            String cdnName;
+            await Future(() async {
+              List<String> sniList;
+              String cdnName;
 
-            if (customSnis != null && customSnis.isNotEmpty) {
-              // از لیست انتخابی کاربر استفاده کن
-              sniList = customSnis;
-              cdnName = 'Custom';
-            } else {
-              // CDN detection اتوماتیک
-              final detected = await _detectCdn(ip);
-              cdnName = detected.$1;
-              sniList = detected.$2;
-            }
+              if (customSnis != null && customSnis.isNotEmpty) {
+                // از لیست انتخابی کاربر استفاده کن
+                sniList = customSnis;
+                cdnName = 'Custom';
+              } else {
+                // CDN detection اتوماتیک
+                final detected = await _detectCdn(ip);
+                cdnName = detected.$1;
+                sniList = detected.$2;
+              }
 
-            final endpoint = cdnMap[cdnName]?.endpoint ?? '/';
+              final endpoint = cdnMap[cdnName]?.endpoint ?? '/';
 
-            for (final sni in sniList) {
-              if (_stopped) break;
-              final (ok, _) = await _stageTls(ip, sni);
-              if (!ok) continue;
-              final (reliable, relCount, _) = await _stageReliability(ip, sni);
-              if (!reliable || _stopped) continue;
-              final bw = await _stageBandwidth(ip, sni, endpoint);
-              if (bw == null) continue;
-              final score = calcScore(bw['speed'], bw['latency'], bw['jitter'], bw['throttled'], relCount);
-              final r = ScanResult(
-                ip: ip, sni: sni, cdn: cdnName,
-                speed: bw['speed'], latency: bw['latency'],
-                jitter: bw['jitter'], throttled: bw['throttled'],
-                throttlePct: bw['throttlePct'], reliability: relCount, score: score,
-              );
-              results.add(r);
-              onResult(r);
-            }
+              for (final sni in sniList) {
+                if (_stopped) break;
+                final (ok, _) = await _stageTls(ip, sni);
+                if (!ok) continue;
+                final (reliable, relCount, _) = await _stageReliability(ip, sni);
+                if (!reliable || _stopped) continue;
+                final bw = await _stageBandwidth(ip, sni, endpoint);
+                if (bw == null) continue;
+                final score = calcScore(bw['speed'], bw['latency'], bw['jitter'], bw['throttled'], relCount);
+                final r = ScanResult(
+                  ip: ip, sni: sni, cdn: cdnName,
+                  speed: bw['speed'], latency: bw['latency'],
+                  jitter: bw['jitter'], throttled: bw['throttled'],
+                  throttlePct: bw['throttlePct'], reliability: relCount, score: score,
+                );
+                results.add(r);
+                onResult(r);
+              }
+            }).timeout(const Duration(seconds: 60), onTimeout: () {});
           } catch (_) {}
         }
       } finally {
