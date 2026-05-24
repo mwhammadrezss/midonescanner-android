@@ -77,8 +77,8 @@ List<String> validateAndExtractIps(String rawText) {
 
 // ─── TCP + TLS + HTTP probe ───────────────────────────────────────────────────
 
-/// TCP + TLS + HTTP GET واقعی — اگه HTTP جواب نداد → null
-Future<double?> _tcpProbe(String ip, int port, {int timeoutMs = 4000}) async {
+/// TCP + TLS + HTTP GET واقعی — SNI قابل تنظیم — latency یا null
+Future<double?> _tcpProbe(String ip, int port, {int timeoutMs = 4000, String sni = 'speed.cloudflare.com'}) async {
   Socket? sock;
   try {
     final sw = Stopwatch()..start();
@@ -88,22 +88,19 @@ Future<double?> _tcpProbe(String ip, int port, {int timeoutMs = 4000}) async {
       timeout: Duration(milliseconds: timeoutMs),
     );
 
-    // TLS handshake
     final secSock = await SecureSocket.secure(
       sock,
-      host: 'speed.cloudflare.com',
+      host: sni,
       onBadCertificate: (_) => true,
     );
 
-    // HTTP GET واقعی
     secSock.write(
       'GET / HTTP/1.1\r\n'
-      'Host: speed.cloudflare.com\r\n'
+      'Host: $sni\r\n'
       'User-Agent: MidONe/1.0\r\n'
       'Connection: close\r\n\r\n',
     );
 
-    // منتظر response
     final buf = StringBuffer();
     await secSock.listen((d) {
       buf.write(String.fromCharCodes(d));
@@ -114,12 +111,10 @@ Future<double?> _tcpProbe(String ip, int port, {int timeoutMs = 4000}) async {
     await secSock.close();
 
     final resp = buf.toString();
-
-    // فقط اگه HTTP response واقعی گرفتیم
     if (resp.contains('HTTP/')) {
       return sw.elapsedMicroseconds / 1000.0;
     }
-    return null; // TCP وصل شد ولی HTTP جواب نداد
+    return null;
 
   } catch (_) {
     return null;
@@ -128,31 +123,26 @@ Future<double?> _tcpProbe(String ip, int port, {int timeoutMs = 4000}) async {
   }
 }
 
-/// بهترین پورت پاسخگو رو پیدا می‌کنه و latency اولیه می‌ده
-Future<({int port, double latency})?> _findBestPort(String ip) async {
-  final lat = await _tcpProbe(ip, 443, timeoutMs: 4000);
-  if (lat != null) return (port: 443, latency: lat);
-  return null;
-}
+// SNIهایی که امتحان می‌کنیم تا IP جواب بده
+const _sniCandidates = [
+  'speed.cloudflare.com',
+  'cloudflare.com',
+  'google.com',
+  'a248.e.akamai.net',
+];
 
-/// تست دانلود واقعی — چند SNI امتحان می‌کنه — برمیگردونه Mbps یا null
-Future<double?> _bandwidthTest(String ip) async {
-  // SNIها به ترتیب — اول Cloudflare، بعد بقیه
-  const trials = [
-    ('speed.cloudflare.com', '/__down?bytes=102400'),
-    ('cloudflare.com',       '/'),
-    ('google.com',           '/'),
-    ('a248.e.akamai.net',    '/'),
-  ];
-
-  for (final (sni, path) in trials) {
-    final result = await _tryBandwidth(ip, sni, path);
-    if (result != null) return result;
+/// بهترین SNI که IP بهش جواب میده رو پیدا می‌کنه + latency
+Future<({String sni, double latency})?> _findBestSni(String ip) async {
+  for (final sni in _sniCandidates) {
+    final lat = await _tcpProbe(ip, 443, timeoutMs: 4000, sni: sni);
+    if (lat != null) return (sni: sni, latency: lat);
   }
   return null;
 }
 
-Future<double?> _tryBandwidth(String ip, String sni, String path) async {
+/// تست دانلود با همون SNI که IP بهش جواب داد
+Future<double?> _bandwidthTest(String ip, String sni) async {
+  final path = sni == 'speed.cloudflare.com' ? '/__down?bytes=102400' : '/';
   Socket? sock;
   try {
     sock = await Socket.connect(ip, 443,
@@ -176,14 +166,13 @@ Future<double?> _tryBandwidth(String ip, String sni, String path) async {
 
     await secSock.listen((d) {
       total += d.length;
-      // یا 100KB گرفتیم یا 3 ثانیه گذشت
       if (total >= 102400 || sw.elapsed.inSeconds >= 3) throw 'done';
     }).asFuture().timeout(const Duration(seconds: 4)).catchError((_) {});
 
     sw.stop();
     await secSock.close();
 
-    if (total > 10000 && sw.elapsedMilliseconds > 0) {
+    if (total > 5000 && sw.elapsedMilliseconds > 0) {
       final mbps = (total * 8) / (sw.elapsedMilliseconds * 1000);
       return double.parse(mbps.toStringAsFixed(2));
     }
@@ -199,11 +188,9 @@ Future<double?> _tryBandwidth(String ip, String sni, String path) async {
 
 /// [repeats] = تعداد دفعات تست (Normal: 3، Deep: 5)
 Future<ScanResult> scanOneIp(String ip, {int repeats = 3, bool testBandwidth = false}) async {
-  // پیدا کردن پورت
-  final best = await _findBestPort(ip);
+  final best = await _findBestSni(ip);
 
   if (best == null) {
-    // هیچ پورتی جواب نداد — IP مرده
     final (country, flag) = GeoIPOffline().lookupFull(ip);
     return ScanResult(
       ip: ip,
@@ -219,35 +206,32 @@ Future<ScanResult> scanOneIp(String ip, {int repeats = 3, bool testBandwidth = f
     );
   }
 
-  // چند بار اندازه می‌گیریم
   final samples = <double>[best.latency];
   int failed = 0;
 
   for (int i = 1; i < repeats; i++) {
-    final lat = await _tcpProbe(ip, best.port, timeoutMs: 4000);
+    final lat = await _tcpProbe(ip, 443, timeoutMs: 4000, sni: best.sni);
     if (lat != null) {
       samples.add(lat);
     } else {
       failed++;
     }
-    // کمی صبر بین probeها (جلوگیری از rate-limit)
     await Future.delayed(const Duration(milliseconds: 150));
   }
 
   final lossPercent = ((failed / repeats) * 100).round();
   final reliability = samples.length / repeats;
 
-  // محاسبه میانگین و jitter
   final avg = samples.reduce((a, b) => a + b) / samples.length;
   final jitter = samples.length > 1
       ? samples.map((s) => (s - avg).abs()).reduce((a, b) => a + b) /
             (samples.length - 1)
       : 0.0;
 
-  // bandwidth فقط در deep scan
+  // bandwidth با همون SNI که جواب داد
   double? bw;
   if (testBandwidth) {
-    bw = await _bandwidthTest(ip);
+    bw = await _bandwidthTest(ip, best.sni);
   }
 
   final (country, flag) = GeoIPOffline().lookupFull(ip);

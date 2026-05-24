@@ -108,7 +108,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _ipController = TextEditingController();
   List<ScanResult> _results = [];
   String _statusText = 'Ready to scan...';
-  String _sortBy = 'score';
+  String _sortBy = 'latency'; // latency | speed | reliability
   bool _filterThrottled = false;
 
   // ISP & ping
@@ -317,9 +317,21 @@ class _HomeScreenState extends State<HomeScreen> {
   List<ScanResult> get _displayResults {
     var list = [..._results];
     if (_filterThrottled) list = list.where((r) => r.isAlive).toList();
-    list.sort((a, b) => _sortBy == 'score'
-        ? a.latencyMs.compareTo(b.latencyMs)
-        : b.reliability.compareTo(a.reliability));
+    switch (_sortBy) {
+      case 'speed':
+        list.sort((a, b) {
+          final bw_a = a.bandwidth ?? -1;
+          final bw_b = b.bandwidth ?? -1;
+          return bw_b.compareTo(bw_a); // بیشترین speed اول
+        });
+      case 'reliability':
+        list.sort((a, b) => b.reliability.compareTo(a.reliability));
+      default: // latency
+        list.sort((a, b) {
+          if (a.isAlive != b.isAlive) return a.isAlive ? -1 : 1;
+          return a.latencyMs.compareTo(b.latencyMs);
+        });
+    }
     return list;
   }
 
@@ -747,16 +759,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: GoogleFonts.inter(
                       color: textSecond, fontSize: 12)),
               const Spacer(),
-              _miniBtn(
-                  _sortBy == 'score' ? 'Latency ↑' : 'Rel ↓', () {
-                setState(() => _sortBy =
-                    _sortBy == 'score' ? 'speed' : 'score');
-              }),
+              _miniBtn('Latency', () => setState(() => _sortBy = 'latency'),
+                  isActive: _sortBy == 'latency'),
               const SizedBox(width: 6),
-              _miniBtn(
-                  _filterThrottled ? 'Alive ✓' : 'Alive', () {
-                setState(() =>
-                    _filterThrottled = !_filterThrottled);
+              _miniBtn('Speed', () => setState(() => _sortBy = 'speed'),
+                  isActive: _sortBy == 'speed'),
+              const SizedBox(width: 6),
+              _miniBtn('Rel', () => setState(() => _sortBy = 'reliability'),
+                  isActive: _sortBy == 'reliability'),
+              const SizedBox(width: 6),
+              _miniBtn(_filterThrottled ? 'Alive ✓' : 'Alive', () {
+                setState(() => _filterThrottled = !_filterThrottled);
               }, isActive: _filterThrottled),
               const SizedBox(width: 6),
               _buildCopyButton(),
