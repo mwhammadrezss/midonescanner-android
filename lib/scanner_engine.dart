@@ -135,23 +135,38 @@ Future<({int port, double latency})?> _findBestPort(String ip) async {
   return null;
 }
 
-/// تست دانلود واقعی — برمیگردونه Mbps یا null
+/// تست دانلود واقعی — چند SNI امتحان می‌کنه — برمیگردونه Mbps یا null
 Future<double?> _bandwidthTest(String ip) async {
+  // SNIها به ترتیب — اول Cloudflare، بعد بقیه
+  const trials = [
+    ('speed.cloudflare.com', '/__down?bytes=102400'),
+    ('cloudflare.com',       '/'),
+    ('google.com',           '/'),
+    ('a248.e.akamai.net',    '/'),
+  ];
+
+  for (final (sni, path) in trials) {
+    final result = await _tryBandwidth(ip, sni, path);
+    if (result != null) return result;
+  }
+  return null;
+}
+
+Future<double?> _tryBandwidth(String ip, String sni, String path) async {
   Socket? sock;
   try {
     sock = await Socket.connect(ip, 443,
-        timeout: const Duration(seconds: 5));
+        timeout: const Duration(seconds: 4));
 
     final secSock = await SecureSocket.secure(
       sock,
-      host: 'speed.cloudflare.com',
+      host: sni,
       onBadCertificate: (_) => true,
     );
 
-    // دانلود 100KB از Cloudflare speed test
     secSock.write(
-      'GET /__down?bytes=102400 HTTP/1.1\r\n'
-      'Host: speed.cloudflare.com\r\n'
+      'GET $path HTTP/1.1\r\n'
+      'Host: $sni\r\n'
       'User-Agent: MidONe/1.0\r\n'
       'Connection: close\r\n\r\n',
     );
@@ -161,8 +176,9 @@ Future<double?> _bandwidthTest(String ip) async {
 
     await secSock.listen((d) {
       total += d.length;
-      if (total >= 102400) throw 'done';
-    }).asFuture().timeout(const Duration(seconds: 6)).catchError((_) {});
+      // یا 100KB گرفتیم یا 3 ثانیه گذشت
+      if (total >= 102400 || sw.elapsed.inSeconds >= 3) throw 'done';
+    }).asFuture().timeout(const Duration(seconds: 4)).catchError((_) {});
 
     sw.stop();
     await secSock.close();
@@ -286,7 +302,7 @@ Future<List<ScanResult>> runScanningEngine(
       final r = await scanOneIp(
         ip,
         repeats: repeats,
-        testBandwidth: mode == ScanMode.deep,
+        testBandwidth: true,
       );
       results.add(r);
       done++;
