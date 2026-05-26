@@ -27,7 +27,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
-import 'probe_engine.dart';
+import 'probe_engine.dart'; // for kShiroSni, kShiroAlpn, acceptCdnCert (exported)
 
 class SurvivalResult {
   final bool survived;
@@ -76,7 +76,7 @@ Future<SurvivalResult> tunnelSurvivalTest(
     tls = await SecureSocket.secure(
       rawSock,
       host: sni,
-      onBadCertificate: _acceptCdnCert,
+      onBadCertificate: acceptCdnCert,
       supportedProtocols: [kShiroAlpn],
     ).timeout(const Duration(seconds: 6));
 

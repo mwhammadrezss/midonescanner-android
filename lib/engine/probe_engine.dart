@@ -58,7 +58,9 @@ class ProbeTimings {
 //   - pem.isEmpty  → no real cert, reject (captive portal / null cert)
 //   - pem.length < 200 → suspiciously short, likely fake
 //   - otherwise    → real cert, accept (CDN fronting is intentional)
-bool _acceptCdnCert(X509Certificate cert) {
+//
+// Public so tunnel_engine.dart can reuse the same policy.
+bool acceptCdnCert(X509Certificate cert) {
   if (cert.pem.isEmpty) return false;
   if (cert.pem.length < 200) return false; // ISP injection / transparent proxy
   return true; // real cert — SNI mismatch ok for CDN fronting
@@ -84,7 +86,7 @@ Future<({double latencyMs, int retransmits, ProbeTimings? timings})?> androidTls
     tls = await SecureSocket.secure(
       rawSock,
       host: sni,
-      onBadCertificate: _acceptCdnCert,
+      onBadCertificate: acceptCdnCert,
       supportedProtocols: [kShiroAlpn],
     ).timeout(Duration(milliseconds: serverHelloMs));
 
@@ -151,7 +153,7 @@ Future<bool> quickTlsCheck(String ip, {int timeoutMs = 3000}) async {
     tls = await SecureSocket.secure(
       rawSock,
       host: kShiroSni,
-      onBadCertificate: _acceptCdnCert,
+      onBadCertificate: acceptCdnCert,
       supportedProtocols: [kShiroAlpn],
     ).timeout(Duration(milliseconds: timeoutMs));
     return true;
@@ -186,7 +188,7 @@ Future<double?> measureBandwidthKBs(
     tls = await SecureSocket.secure(
       rawSock,
       host: sni,
-      onBadCertificate: _acceptCdnCert,
+      onBadCertificate: acceptCdnCert,
       supportedProtocols: [kShiroAlpn],
     ).timeout(const Duration(seconds: 6));
 
