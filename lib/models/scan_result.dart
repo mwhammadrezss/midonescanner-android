@@ -23,11 +23,15 @@ class ScanResult {
   final int       loss;
   final double    reliability;
 
-  // ── New survival fields ──────────────────────────────────────────────────
+  // ── Survival fields ──────────────────────────────────────────────────────
   final double?   score;          // 0-100 weighted score
   final int?      survivalMs;     // how long tunnel stayed alive (ms)
   final int       retransmits;    // TCP retransmit count
   final ScanPhase phase;          // furthest phase reached
+
+  // ── Bandwidth & SNI fields ───────────────────────────────────────────────
+  final double?   speedKBs;       // download speed in KB/s (null if not tested)
+  final String?   sniUsed;        // which SNI gave the best result
 
   const ScanResult({
     required this.ip,
@@ -43,6 +47,8 @@ class ScanResult {
     this.survivalMs,
     this.retransmits = 0,
     this.phase = ScanPhase.tcpFail,
+    this.speedKBs,
+    this.sniUsed,
   });
 
   /// Human-readable phase label shown in UI

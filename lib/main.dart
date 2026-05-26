@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'scanner_engine.dart';
+import 'engine/probe_engine.dart' show kDeepSniPresets;
 import 'models/scan_result.dart' show ScanPhase;
 import 'geoip.dart';
 
@@ -105,12 +106,18 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _scanning = false;
   bool _cancelled = false;
   int _done = 0, _total = 0, _okCount = 0, _thrCount = 0, _failCount = 0;
+  int _prefilterLive = 0, _prefilterTotal = 0;
+  bool _prefiltering = false;
 
   final _ipController = TextEditingController();
   List<ScanResult> _results = [];
   String _statusText = 'Ready to scan...';
   String _sortBy = 'latency'; // latency | speed | reliability
   bool _filterThrottled = false;
+
+  // Deep mode SNI selection
+  Set<String> _selectedSnis = {'www.google.com'};
+  final _customSniController = TextEditingController();
 
   // ISP & ping
   String _ispName = 'در حال بررسی...';
@@ -128,6 +135,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _ispTimer?.cancel();
+    _customSniController.dispose();
     super.dispose();
   }
 
@@ -247,6 +255,17 @@ class _HomeScreenState extends State<HomeScreen> {
   void _startScan() {
     final ips = validateAndExtractIps(_ipController.text);
     if (ips.isEmpty) { _showSnack('No valid IPs found!'); return; }
+
+    // For Deep mode: show SNI picker first, then scan
+    if (_mode == 2) {
+      _showSniPickerDialog(ips);
+      return;
+    }
+
+    _runScan(ips, null);
+  }
+
+  void _runScan(List<String> ips, List<String>? deepSnis) {
     setState(() {
       _scanning = true;
       _cancelled = false;
@@ -256,12 +275,27 @@ class _HomeScreenState extends State<HomeScreen> {
       _okCount = 0;
       _thrCount = 0;
       _failCount = 0;
-      _statusText = 'Scanning...';
+      _prefilterLive = 0;
+      _prefilterTotal = ips.length;
+      _prefiltering = true;
+      _statusText = 'Pre-filtering ${ips.length} IPs...';
     });
 
     runScanningEngine(
       ips,
       mode: _mode == 2 ? ScanMode.deep : ScanMode.normal,
+      deepSnis: deepSnis,
+      onPrefilterDone: (liveCount, totalCount) {
+        if (!mounted) return;
+        setState(() {
+          _prefilterLive  = liveCount;
+          _prefilterTotal = totalCount;
+          _prefiltering   = false;
+          _total          = liveCount;
+          _done           = 0;
+          _statusText     = 'Scanning $liveCount live IPs (${totalCount - liveCount} dead filtered)...';
+        });
+      },
       onProgress: (done, total, result) {
         if (!mounted) return;
         setState(() {
@@ -277,9 +311,10 @@ class _HomeScreenState extends State<HomeScreen> {
           } else {
             _failCount++;
           }
-          _statusText = 'Scanning ${(done / total * 100).round()}%';
+          final pct = total > 0 ? (done / total * 100).round() : 0;
+          _statusText = 'Scanning $pct%';
         });
-        final pct = (done / total * 100).round();
+        final pct = _total > 0 ? (_done / _total * 100).round() : 0;
         if (pct % 25 == 0 || pct >= 100) {
           if (pct >= 100) {
             sendNotification('✅ اسکن تموم شد!', 'نتایج آماده‌ست. برگرد به برنامه.');
@@ -294,6 +329,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _results = results;
         _scanning = false;
+        _prefiltering = false;
         _statusText = 'Done! ${results.where((r) => r.isAlive).length} results';
       });
       if (results.isNotEmpty) {
@@ -303,8 +339,253 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     }).catchError((e) {
-      if (mounted) setState(() => _scanning = false);
+      if (mounted) setState(() { _scanning = false; _prefiltering = false; });
     });
+  }
+
+  // ── SNI Picker Dialog (Deep Mode) ─────────────────────────────────────────
+  void _showSniPickerDialog(List<String> ips) {
+    // Build a local copy for dialog state
+    final localSelected = Set<String>.from(_selectedSnis);
+    final allSnis = List<String>.from(kDeepSniPresets);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: cardColor,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          return Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(ctx).viewInsets.bottom,
+            ),
+            child: Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(ctx).size.height * 0.85,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Handle
+                  Container(
+                    margin: const EdgeInsets.only(top: 12, bottom: 4),
+                    width: 40, height: 4,
+                    decoration: BoxDecoration(
+                        color: borderColor,
+                        borderRadius: BorderRadius.circular(2)),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 12),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.tune_rounded,
+                            color: accentLime, size: 20),
+                        const SizedBox(width: 8),
+                        Text('Deep Scan — SNI Selection',
+                            style: GoogleFonts.inter(
+                                color: accentLime,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 16)),
+                        const Spacer(),
+                        Text('${localSelected.length} selected',
+                            style: GoogleFonts.inter(
+                                color: textSecond, fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                  const Divider(color: borderColor, height: 1),
+                  // SNI list
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                      itemCount: allSnis.length,
+                      itemBuilder: (ctx, i) {
+                        final sni = allSnis[i];
+                        final checked = localSelected.contains(sni);
+                        return GestureDetector(
+                          onTap: () {
+                            setModalState(() {
+                              if (checked) {
+                                // keep at least 1 selected
+                                if (localSelected.length > 1) {
+                                  localSelected.remove(sni);
+                                }
+                              } else {
+                                localSelected.add(sni);
+                              }
+                            });
+                          },
+                          child: Container(
+                            margin: const EdgeInsets.only(bottom: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 12),
+                            decoration: BoxDecoration(
+                              color: checked
+                                  ? accentLime.withOpacity(0.08)
+                                  : iconBg,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                  color: checked
+                                      ? accentLime.withOpacity(0.4)
+                                      : borderColor),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  checked
+                                      ? Icons.check_box_rounded
+                                      : Icons.check_box_outline_blank_rounded,
+                                  color: checked ? accentLime : textSecond,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(sni,
+                                      style: GoogleFonts.robotoMono(
+                                          color: checked
+                                              ? textPrimary
+                                              : textSecond,
+                                          fontSize: 13,
+                                          fontWeight: checked
+                                              ? FontWeight.w600
+                                              : FontWeight.normal)),
+                                ),
+                                if (sni == 'www.google.com')
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                        color: accentLime.withOpacity(0.15),
+                                        borderRadius:
+                                            BorderRadius.circular(6)),
+                                    child: Text('ShirKhorshid',
+                                        style: GoogleFonts.inter(
+                                            color: accentLime,
+                                            fontSize: 9,
+                                            fontWeight:
+                                                FontWeight.w700)),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  // Custom SNI input
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _customSniController,
+                            style: GoogleFonts.robotoMono(
+                                color: textPrimary, fontSize: 13),
+                            decoration: InputDecoration(
+                              hintText: 'Add custom SNI...',
+                              hintStyle: GoogleFonts.robotoMono(
+                                  color: textSecond, fontSize: 13),
+                              filled: true,
+                              fillColor: iconBg,
+                              contentPadding:
+                                  const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 10),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(
+                                    color: borderColor),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(
+                                    color: borderColor),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(
+                                    color: accentLime),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: () {
+                            final custom =
+                                _customSniController.text.trim();
+                            if (custom.isNotEmpty &&
+                                !allSnis.contains(custom)) {
+                              setModalState(() {
+                                allSnis.add(custom);
+                                localSelected.add(custom);
+                                _customSniController.clear();
+                              });
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 11),
+                            decoration: BoxDecoration(
+                                color: accentLime,
+                                borderRadius:
+                                    BorderRadius.circular(12)),
+                            child: Text('Add',
+                                style: GoogleFonts.inter(
+                                    color: bgColor,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Start button
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          setState(() {
+                            _selectedSnis =
+                                Set<String>.from(localSelected);
+                          });
+                          _runScan(ips,
+                              localSelected.toList());
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: accentLime,
+                          foregroundColor: bgColor,
+                          shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(14)),
+                          elevation: 0,
+                        ),
+                        child: Text(
+                          'Start Deep Scan (${localSelected.length} SNIs)',
+                          style: GoogleFonts.inter(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   void _stopScan() {
@@ -368,7 +649,9 @@ class _HomeScreenState extends State<HomeScreen> {
       buf.writeln('\n=== TOP 5 ===');
       for (int i = 0; i < top5.length; i++) {
         final r = top5[i];
-        buf.writeln('${i + 1}. IP:${r.ip}  ${r.latencyMs.toStringAsFixed(1)} ms  Loss:${r.loss}%  Grade:${r.grade}  ${r.flag} ${r.country}');
+        final speedStr = r.speedKBs != null ? '  Speed:${r.speedKBs!.toStringAsFixed(1)} KB/s' : '';
+      final sniStr   = r.sniUsed  != null ? '  SNI:${r.sniUsed}'                             : '';
+      buf.writeln('${i + 1}. IP:${r.ip}  ${r.latencyMs.toStringAsFixed(1)} ms  Loss:${r.loss}%  Grade:${r.grade}$speedStr$sniStr  ${r.flag} ${r.country}');
       }
       buf.writeln('\n=== ALL RESULTS ===');
       for (final r in _results) {
@@ -502,9 +785,9 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(child: _modeBtn(1, 'Normal', 'Fast · 3 probes')),
+              Expanded(child: _modeBtn(1, 'Normal', 'Fast · BW test')),
               const SizedBox(width: 10),
-              Expanded(child: _modeBtn(2, 'Deep', 'Accurate · 5 probes')),
+              Expanded(child: _modeBtn(2, 'Deep', 'Multi-SNI · 5 probes')),
             ],
           ),
         ],
@@ -640,6 +923,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final pct = _total > 0 ? _done / _total : 0.0;
     return _card(
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
@@ -647,11 +931,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   size: 8,
                   color: _scanning ? accentLime : textSecond),
               const SizedBox(width: 6),
-              Text(_statusText,
-                  style: GoogleFonts.inter(
-                      color: _scanning ? accentLime : textSecond,
-                      fontSize: 13, fontWeight: FontWeight.w500)),
-              const Spacer(),
+              Expanded(
+                child: Text(_statusText,
+                    style: GoogleFonts.inter(
+                        color: _scanning ? accentLime : textSecond,
+                        fontSize: 13, fontWeight: FontWeight.w500)),
+              ),
               if (_total > 0)
                 Text('$_done / $_total',
                     style: GoogleFonts.inter(
@@ -664,13 +949,27 @@ class _HomeScreenState extends State<HomeScreen> {
           ClipRRect(
             borderRadius: BorderRadius.circular(6),
             child: LinearProgressIndicator(
-              value: pct,
+              value: _prefiltering ? null : pct,
               backgroundColor: iconBg,
-              valueColor:
-                  const AlwaysStoppedAnimation(accentLime2),
+              valueColor: AlwaysStoppedAnimation(
+                _prefiltering ? const Color(0xFFFFAB40) : accentLime2),
               minHeight: 6,
             ),
           ),
+          if (_prefilterTotal > 0 && !_prefiltering) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                _chip(Icons.filter_alt_rounded,
+                    '$_prefilterLive live / $_prefilterTotal',
+                    accentLime),
+                const SizedBox(width: 6),
+                _chip(Icons.delete_sweep_rounded,
+                    '${_prefilterTotal - _prefilterLive} dead removed',
+                    const Color(0xFFFF5252)),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -1001,6 +1300,25 @@ class _HomeScreenState extends State<HomeScreen> {
                       : const Color(0xFFFF6060)),
             ],
           ),
+          if (r.speedKBs != null || r.sniUsed != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                if (r.speedKBs != null)
+                  _chip(Icons.bolt_rounded,
+                      '${r.speedKBs!.toStringAsFixed(1)} KB/s',
+                      const Color(0xFFFFD700)),
+                if (r.sniUsed != null) ...[
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: _chip(Icons.dns_rounded,
+                        r.sniUsed!,
+                        const Color(0xFF80CFFF)),
+                  ),
+                ],
+              ],
+            ),
+          ],
           const SizedBox(height: 8),
           Row(
             children: [

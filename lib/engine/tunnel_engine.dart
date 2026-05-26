@@ -21,14 +21,15 @@ class SurvivalResult {
 // Phase 5: Tunnel Survival (20-30 s) + Phase 7: DPI Resistance
 Future<SurvivalResult> tunnelSurvivalTest(
   String ip, {
-  int survivalTargetMs    = 25000,
-  int keepaliveIntervalMs = 5000,
+  String sni                  = kShiroSni,
+  int    survivalTargetMs     = 25000,
+  int    keepaliveIntervalMs  = 5000,
 }) async {
   Socket?       rawSock;
   SecureSocket? tls;
-  final         sw         = Stopwatch()..start();
-  bool          dpiKilled  = false;
-  bool          blackhole  = false;
+  final         sw        = Stopwatch()..start();
+  bool          dpiKilled = false;
+  bool          blackhole = false;
 
   try {
     rawSock = await Socket.connect(
@@ -38,7 +39,7 @@ Future<SurvivalResult> tunnelSurvivalTest(
 
     tls = await SecureSocket.secure(
       rawSock,
-      host: kShiroSni,
+      host: sni,
       onBadCertificate: (_) => true,
       supportedProtocols: [kShiroAlpn],
     ).timeout(const Duration(seconds: 6));
@@ -67,7 +68,7 @@ Future<SurvivalResult> tunnelSurvivalTest(
       try {
         tls.write(
           'OPTIONS / HTTP/1.1\r\n'
-          'Host: $kShiroSni\r\n'
+          'Host: $sni\r\n'
           'User-Agent: Android\r\n'
           'Connection: keep-alive\r\n\r\n',
         );
