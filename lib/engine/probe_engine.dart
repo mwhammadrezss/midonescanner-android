@@ -8,17 +8,30 @@ const kShiroSni  = 'www.google.com';
 const kShiroAlpn = 'http/1.1';
 
 // ── SNI presets for ShirKhorshid CDN ────────────────────────────────────────
-// Extracted from Wireshark pcap + ShirKhorshid source analysis
+// Sources:
+//   1. Wireshark pcap analysis of ShirKhorshid (confirmed SNI=www.google.com)
+//   2. Python scanner (MidONeScanner.py) CDN_MAP
+//   3. Domain fronting research (2025): Fastly/Akamai still partially viable
+//
+// For ShirKhorshid (uses Google CDN mode): www.google.com is primary.
+// Other SNIs are tested in Deep mode to find best-performing CDN edge IP.
+//
+// Domain fronting status (2026):
+//   Google: disabled 2018 — but Google CDN IPs still reachable via TLS probe
+//   Cloudflare: disabled 2015 — IPs still scannable
+//   Akamai (a248.e.akamai.net): still valid cert/SNI, partial fronting
+//   Fastly (global.fastly.net): varies by customer config, may still work
+//   Microsoft/Azure: disabled 2022
 const kDeepSniPresets = [
-  'www.google.com',        // default — confirmed in Wireshark
-  'google.com',
-  'speed.cloudflare.com',
-  'cloudflare.com',
-  'a248.e.akamai.net',
-  'fonts.googleapis.com',
-  'github.com',
-  'ajax.aspnetcdn.com',
-  'global.fastly.net',
+  'www.google.com',        // ★ PRIMARY — confirmed by ShirKhorshid Wireshark
+  'google.com',            // Google CDN fallback
+  'speed.cloudflare.com',  // Cloudflare — best for bandwidth test (/__down)
+  'cloudflare.com',        // Cloudflare fallback
+  'a248.e.akamai.net',     // Akamai — valid cert, partial fronting
+  'fonts.googleapis.com',  // Google APIs CDN
+  'global.fastly.net',     // Fastly — fronting may still work
+  'github.com',            // GitHub (Fastly-backed)
+  'ajax.aspnetcdn.com',    // Microsoft CDN
 ];
 
 Future<({double latencyMs, int retransmits})?> androidTlsProbe(
