@@ -1,52 +1,64 @@
 // lib/engine/grading_engine.dart
-// Weighted scoring: survival 40% + stability 25% + RTT 15% + retransmit 10% + jitter 10%
+// Weighted scoring: survival 50% + stability 30% + RTT 20%
+// Retransmits removed (always 0 from TLS layer — unusable metric)
+// Bandwidth NOT included in score (too noisy: CDN caching, TCP slow start)
 
 import '../models/scan_result.dart';
 
-/// Calculate 0-100 score based on the 8-phase pipeline results
+/// Calculate 0-100 score
 double calcScore({
   required bool   survived,
   required int    survivalMs,
   required int    survivalTargetMs,
   required double avgLatencyMs,
   required double jitterMs,
-  required int    retransmits,
   required double reliability,   // 0.0–1.0
 }) {
-  // ── Survival (40%) ───────────────────────────────────────────────────────
-  // Full 40 pts if survived ≥ target, partial if partial survival
-  final survivalRatio  = survived
+  // ── Survival (50%) ───────────────────────────────────────────────────────
+  // Full 50 pts at target, partial for partial survival.
+  // Even 5s survival gets some credit (5/20 = 0.25 × 50 = 12.5 pts)
+  final survivalRatio = survived
       ? 1.0
       : (survivalMs / survivalTargetMs).clamp(0.0, 1.0);
-  final survivalScore  = survivalRatio * 40.0;
+  final survivalScore = survivalRatio * 50.0;
 
-  // ── Stability / Reliability (25%) ────────────────────────────────────────
-  final stabilityScore = reliability * 25.0;
+  // ── Stability / Reliability (30%) ────────────────────────────────────────
+  final stabilityScore = reliability * 30.0;
 
-  // ── RTT (15%) ────────────────────────────────────────────────────────────
-  // 15 pts at 0 ms, 0 pts at 800 ms
-  final rttScore = (1.0 - (avgLatencyMs / 800.0).clamp(0.0, 1.0)) * 15.0;
+  // ── RTT (20%) ────────────────────────────────────────────────────────────
+  // 20 pts at 0ms, 0 pts at 1000ms (more generous than before)
+  final rttScore = (1.0 - (avgLatencyMs / 1000.0).clamp(0.0, 1.0)) * 20.0;
 
-  // ── Retransmits (10%) ────────────────────────────────────────────────────
-  // 0 retransmits = 10 pts, ≥5 = 0 pts
-  final retScore = (1.0 - (retransmits / 5.0).clamp(0.0, 1.0)) * 10.0;
-
-  // ── Jitter (10%) ─────────────────────────────────────────────────────────
-  // 0 ms jitter = 10 pts, ≥100 ms = 0 pts
-  final jitterScore = (1.0 - (jitterMs / 100.0).clamp(0.0, 1.0)) * 10.0;
-
-  final total = survivalScore + stabilityScore + rttScore + retScore + jitterScore;
+  final total = survivalScore + stabilityScore + rttScore;
   return double.parse(total.toStringAsFixed(1));
+}
+
+/// Soft tier classification — permissive, not elitist
+IpTier calcTier(int survivalMs, ScanPhase phase) {
+  if (phase == ScanPhase.tcpFail ||
+      phase == ScanPhase.tlsFail ||
+      phase == ScanPhase.handshakeFail) {
+    return IpTier.dead;
+  }
+  if (phase == ScanPhase.stabilityFail) return IpTier.dead;
+  // TLS ok but no survival at all
+  if (survivalMs < 3000) return IpTier.weak;
+  // Short survival — still usable for ShirKhorshid
+  if (survivalMs >= 20000) return IpTier.excellent;
+  if (survivalMs >= 10000) return IpTier.good;
+  if (survivalMs >=  5000) return IpTier.usable;
+  return IpTier.weak;
 }
 
 /// Letter grade from score
 String calcGradeFromScore(double score, ScanPhase phase) {
   if (phase == ScanPhase.tcpFail ||
       phase == ScanPhase.tlsFail ||
-      phase == ScanPhase.handshakeFail) return 'F';
+      phase == ScanPhase.handshakeFail ||
+      phase == ScanPhase.stabilityFail) return 'F';
   if (score >= 80) return 'A';
-  if (score >= 65) return 'B';
-  if (score >= 45) return 'C';
-  if (score >= 25) return 'D';
+  if (score >= 60) return 'B';
+  if (score >= 40) return 'C';
+  if (score >= 20) return 'D';
   return 'F';
 }

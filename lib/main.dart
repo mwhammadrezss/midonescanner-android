@@ -11,7 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'scanner_engine.dart';
 import 'engine/probe_engine.dart' show kDeepSniPresets;
-import 'models/scan_result.dart' show ScanPhase;
+import 'models/scan_result.dart' show ScanPhase, IpTier;
 import 'geoip.dart';
 
 // ─── Notifications ──────────────────────────────────────────────────────────
@@ -60,6 +60,16 @@ Color gradeColor(ScanResult r) {
     case 'C': return const Color(0xFFE0E060);
     case 'D': return const Color(0xFFE0A060);
     default:  return const Color(0xFFFF5252);
+  }
+}
+
+Color tierColor(IpTier tier) {
+  switch (tier) {
+    case IpTier.excellent: return accentLime;
+    case IpTier.good:      return const Color(0xFF80E060);
+    case IpTier.usable:    return const Color(0xFFFFD060);
+    case IpTier.weak:      return const Color(0xFFFF8C40);
+    case IpTier.dead:      return const Color(0xFFFF5252);
   }
 }
 
@@ -302,12 +312,11 @@ class _HomeScreenState extends State<HomeScreen> {
           _results.add(result);
           _done = done;
           _total = total;
-          if (result.isAlive) {
-            if (result.loss > 30) {
-              _thrCount++;
-            } else {
-              _okCount++;
-            }
+          if (result.tier == IpTier.excellent || result.tier == IpTier.good) {
+            _okCount++;
+          } else if (result.tier == IpTier.usable || result.tier == IpTier.weak) {
+            _thrCount++;
+          } else {
           } else {
             _failCount++;
           }
@@ -980,14 +989,14 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         Expanded(
             child: _statCard(
-                '$_okCount', 'Passed', accentLime, statusGreen)),
+                '$_okCount', 'Excellent/Good', accentLime, statusGreen)),
         const SizedBox(width: 8),
         Expanded(
             child: _statCard(
-                '$_failCount', 'Failed', const Color(0xFFFF5252), statusRed)),
+                '$_failCount', 'Dead', const Color(0xFFFF5252), statusRed)),
         const SizedBox(width: 8),
         Expanded(
-            child: _statCard('$_thrCount', 'DPI/Fail',
+            child: _statCard('$_thrCount', 'Usable/Weak',
                 const Color(0xFFFFAB40), statusOrange)),
       ],
     );
@@ -1293,8 +1302,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     const Color(0xFF60AAFF)),
               ],
               const SizedBox(width: 8),
+              _chip(Icons.signal_cellular_alt_rounded,
+                  r.tierLabel,
+                  tierColor(r.tier)),
+              const SizedBox(width: 8),
               _chip(Icons.timeline_rounded,
-                  r.phaseLabel,
+                  '${(r.survivalMs ?? 0) ~/ 1000}s',
                   r.isAlive
                       ? const Color(0xFF60FF90)
                       : const Color(0xFFFF6060)),

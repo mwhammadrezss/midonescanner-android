@@ -1,6 +1,6 @@
 // lib/models/scan_result.dart
 
-/// Phase labels for 8-step pipeline
+/// Phase labels for pipeline
 enum ScanPhase {
   tcpFail,
   tlsFail,
@@ -10,6 +10,15 @@ enum ScanPhase {
   stabilityFail,
   dpiFail,
   passed,
+}
+
+/// Soft usability classification — permissive, not elitist
+enum IpTier {
+  excellent,  // 20s+ survived
+  good,       // 10s+ survived
+  usable,     // 5s+ survived (TLS ok, short survival)
+  weak,       // TLS handshake only, no survival
+  dead,       // TCP/TLS fail
 }
 
 class ScanResult {
@@ -24,14 +33,15 @@ class ScanResult {
   final double    reliability;
 
   // ── Survival fields ──────────────────────────────────────────────────────
-  final double?   score;          // 0-100 weighted score
-  final int?      survivalMs;     // how long tunnel stayed alive (ms)
-  final int       retransmits;    // TCP retransmit count
-  final ScanPhase phase;          // furthest phase reached
+  final double?   score;
+  final int?      survivalMs;
+  final int       retransmits;
+  final ScanPhase phase;
+  final IpTier    tier;
 
   // ── Bandwidth & SNI fields ───────────────────────────────────────────────
-  final double?   speedKBs;       // download speed in KB/s (null if not tested)
-  final String?   sniUsed;        // which SNI gave the best result
+  final double?   speedKBs;
+  final String?   sniUsed;
 
   const ScanResult({
     required this.ip,
@@ -47,21 +57,31 @@ class ScanResult {
     this.survivalMs,
     this.retransmits = 0,
     this.phase = ScanPhase.tcpFail,
+    this.tier  = IpTier.dead,
     this.speedKBs,
     this.sniUsed,
   });
 
-  /// Human-readable phase label shown in UI
   String get phaseLabel {
     switch (phase) {
       case ScanPhase.tcpFail:        return 'TCP Fail';
       case ScanPhase.tlsFail:        return 'TLS Fail';
       case ScanPhase.handshakeFail:  return 'Handshake';
       case ScanPhase.completionFail: return 'TLS Incomplete';
-      case ScanPhase.survivalFail:   return 'No Survival';
+      case ScanPhase.survivalFail:   return 'Weak';
       case ScanPhase.stabilityFail:  return 'Unstable';
       case ScanPhase.dpiFail:        return 'DPI Killed';
       case ScanPhase.passed:         return 'Passed ✓';
+    }
+  }
+
+  String get tierLabel {
+    switch (tier) {
+      case IpTier.excellent: return '★★★ Excellent';
+      case IpTier.good:      return '★★ Good';
+      case IpTier.usable:    return '★ Usable';
+      case IpTier.weak:      return 'Weak';
+      case IpTier.dead:      return 'Dead';
     }
   }
 }

@@ -101,7 +101,7 @@ Future<({double latencyMs, int retransmits})?> probeWithRetry(
 
 // ── Quick TCP pre-filter — detect dead/fake IPs fast ────────────────────────
 // Run with high concurrency before full scan to skip clearly dead IPs.
-Future<bool> quickTcpCheck(String ip, {int timeoutMs = 1500}) async {
+Future<bool> quickTcpCheck(String ip, {int timeoutMs = 3000}) async {
   Socket? sock;
   try {
     sock = await Socket.connect(
