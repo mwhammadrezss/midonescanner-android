@@ -300,7 +300,7 @@ Future<List<ScanResult>> runScanningEngine(
 
   // ── Step 0: Quick TLS pre-filter ─────────────────────────────────────────
   // BUG 5 FIX: collect results via return value instead of concurrent .add()
-  final prefilterSem = Semaphore(50);
+  final prefilterSem = Semaphore(12); // CHANGE: reduced from 50 — flood caused timeouts on mobile
 
   final liveIpResults = await Future.wait(filteredIps.map((ip) async {
     if (cancelCheck()) return null;
