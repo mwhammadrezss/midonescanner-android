@@ -170,32 +170,18 @@ Future<({double latencyMs, int retransmits, ProbeTimings? timings})?> probeWithR
 // p5: quickTlsHelloProbe — Full SYN → ClientHello → ServerHello check.
 // More accurate than TCP-only: catches TLS blackholes early.
 // Uses same cert policy as main probes.
-Future<bool> quickTlsCheck(String ip, {int timeoutMs = 3000}) async {
-  Socket?       rawSock;
-  SecureSocket? tls;
+Future<bool> quickTlsCheck(String ip, {int timeoutMs = 4000}) async {
+  Socket? sock; // CHANGE: TCP-only pre-filter — Iranian ISPs DPI-reset TLS handshakes
   try {
-    rawSock = await Socket.connect(
+    sock = await Socket.connect(
       ip, 443,
       timeout: Duration(milliseconds: timeoutMs),
     );
-
-    // p9: small random pacing
-    await Future.delayed(
-      Duration(microseconds: 50 + _probeRng.nextInt(450)),
-    );
-
-    tls = await SecureSocket.secure(
-      rawSock,
-      host: kShiroSni,
-      onBadCertificate: acceptCdnCert,
-      supportedProtocols: [kShiroAlpn],
-    ).timeout(Duration(milliseconds: timeoutMs));
     return true;
   } catch (_) {
     return false;
   } finally {
-    try { tls?.destroy();     } catch (_) {}
-    try { rawSock?.destroy(); } catch (_) {}
+    try { sock?.destroy(); } catch (_) {}
   }
 }
 
