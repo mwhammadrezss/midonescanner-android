@@ -138,6 +138,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _done = 0, _total = 0, _okCount = 0, _thrCount = 0, _failCount = 0;
   int _prefilterLive = 0, _prefilterTotal = 0;
   bool _prefiltering = false;
+  int _prefilterChecked = 0; // CHANGE: live pre-filter checked counter
 
   final _ipController = TextEditingController();
   List<ScanResult> _results = [];
@@ -441,6 +442,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _prefilterLive = 0;
       _prefilterTotal = ips.length;
       _prefiltering = true;
+      _prefilterChecked = 0; // CHANGE: reset live counter on new scan
       _displayDirty = true;
       _cachedDisplay = [];
       _statusText = 'Pre-filtering ${ips.length} IPs...';
@@ -453,6 +455,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       mode: _mode == 2 ? ScanMode.deep : ScanMode.normal,
       concurrency: activeProfile.concurrency,  // BUG 6 FIX: pass profile concurrency
       deepSnis: deepSnis,
+      onPrefilterProgress: (checked, total, live) { // CHANGE: live pre-filter UI update
+        if (!mounted) return;
+        setState(() {
+          _prefilterChecked = checked;
+          _prefilterLive    = live;
+          _prefilterTotal   = total;
+          final pct = total > 0 ? (checked / total * 100).round() : 0;
+          _statusText = 'Pre-filtering $pct% — $live live / $checked checked';
+        });
+      },
       onPrefilterDone: (liveCount, totalCount) {
         if (!mounted) return;
         setState(() {
@@ -1392,14 +1404,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ClipRRect(
             borderRadius: BorderRadius.circular(6),
             child: LinearProgressIndicator(
-              value: _prefiltering ? null : pct,
+              value: _prefiltering // CHANGE: show real pre-filter % instead of indeterminate
+                  ? (_prefilterTotal > 0 ? _prefilterChecked / _prefilterTotal : null)
+                  : pct,
               backgroundColor: iconBg,
               valueColor: AlwaysStoppedAnimation(
                   _prefiltering ? const Color(0xFFFFAB40) : accentLime2),
               minHeight: 6,
             ),
           ),
-          if (_prefilterTotal > 0 && !_prefiltering) ...[
+          if (_prefilterTotal > 0 && _prefiltering) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                _chip(Icons.filter_alt_rounded, '$_prefilterChecked / $_prefilterTotal checked', const Color(0xFFFFAB40)),
+                const SizedBox(width: 6),
+                _chip(Icons.wifi_tethering_rounded, '$_prefilterLive live found', accentLime), // CHANGE: live count during pre-filter
+              ],
+            ),
+          ] else if (_prefilterTotal > 0 && !_prefiltering) ...[
             const SizedBox(height: 8),
             Row(
               children: [
