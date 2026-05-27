@@ -218,7 +218,7 @@ Future<SurvivalResult> tunnelSurvivalTest(
     }).catchError((_) {});
 
     sw.stop();
-    connectionDead = true;
+    connectionDead = true; // BUGFIX: set before sub.cancel() to stop heartbeat loop immediately
     await sub.cancel();
     try { await tls.close(); } catch (_) {}
     tls.destroy();

@@ -180,7 +180,9 @@ Future<ScanResult> _scanWithSni(
   // (avoids wasting 20s survival test when all repeat probes failed)
   if (samples.isEmpty) return dead(ScanPhase.stabilityFail);
 
-  final lossPercent = ((failed / repeats) * 100).round();
+  final lossPercent = repeats > 1 // BUGFIX: denominator is probes that can fail (repeats-1)
+      ? ((failed / (repeats - 1)) * 100).round().clamp(0, 100)
+      : 0;
   final reliability = samples.length / repeats;
   final avg         = samples.reduce((a, b) => a + b) / samples.length;
   final jitter      = calcJitter(samples);

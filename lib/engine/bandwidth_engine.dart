@@ -35,8 +35,8 @@ Future<double?> bandwidthTest(
     );
 
     secSock.write(
-      'GET \$path HTTP/1.1\r\n'
-      'Host: \$sni\r\n'
+      'GET $path HTTP/1.1\r\n' // BUGFIX: was \$path and \\r\\n — malformed HTTP
+      'Host: $sni\r\n'
       'User-Agent: MidONe/1.0\r\n'
       'Connection: close\r\n\r\n',
     );

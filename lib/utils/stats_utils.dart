@@ -9,7 +9,7 @@ double calcJitter(List<double> samples) {
   final variance = samples
       .map((x) => pow(x - avg, 2))
       .reduce((a, b) => a + b) /
-      samples.length;
+      (samples.length - 1); // BUGFIX: sample variance (Bessel's correction), not population variance
 
   return sqrt(variance);
 }
