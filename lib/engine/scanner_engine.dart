@@ -284,6 +284,7 @@ Future<List<ScanResult>> runScanningEngine(
   List<String>? deepSnis,
   void Function(int done, int total, ScanResult result)? onProgress,
   void Function(int liveCount, int totalCount)? onPrefilterDone,
+  void Function(int checked, int total, int liveCount)? onPrefilterProgress, // CHANGE: live pre-filter progress
   bool Function()? isCancelled,
 }) async {
   final results     = <ScanResult>[];
@@ -301,6 +302,8 @@ Future<List<ScanResult>> runScanningEngine(
   // ── Step 0: Quick TLS pre-filter ─────────────────────────────────────────
   // BUG 5 FIX: collect results via return value instead of concurrent .add()
   final prefilterSem = Semaphore(12); // CHANGE: reduced from 50 — flood caused timeouts on mobile
+  int _prefilterChecked = 0; // CHANGE: track checked count for live progress
+  int _prefilterLive    = 0; // CHANGE: track live count for live progress
 
   final liveIpResults = await Future.wait(filteredIps.map((ip) async {
     if (cancelCheck()) return null;
@@ -311,7 +314,11 @@ Future<List<ScanResult>> runScanningEngine(
       if (!alive) {
         SoftBlacklist().recordFailure(ip);
         SubnetMemoryCache().recordFailure(ip);
+      } else {
+        _prefilterLive++; // CHANGE: increment live counter
       }
+      _prefilterChecked++; // CHANGE: increment checked counter
+      onPrefilterProgress?.call(_prefilterChecked, ips.length, _prefilterLive); // CHANGE: fire callback
       return alive ? ip : null;
     } finally {
       prefilterSem.release();
