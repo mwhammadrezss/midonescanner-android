@@ -1740,6 +1740,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               // p20: confidence score
               if (r.confidenceScore != null)
                 _chip(Icons.verified_rounded, 'Conf ${r.confidenceScore!.toStringAsFixed(0)}', const Color(0xFF80CFFF)),
+              // cf1/ws2: Cloudflare datacenter + WebSocket DPI result
+              if (r.colo != null)
+                _chip(Icons.cell_tower_rounded, r.colo!, const Color(0xFF00E5FF)),
+              if (r.wsOk != null)
+                _chip(
+                  r.wsOk! ? Icons.check_circle_rounded : Icons.block_rounded,
+                  r.wsOk! ? 'WS ✓' : 'WS ✗',
+                  r.wsOk! ? const Color(0xFF00E676) : const Color(0xFFFF5252),
+                ),
             ],
           ),
           if (r.speedKBs != null || r.sniUsed != null) ...[
