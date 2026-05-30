@@ -3,9 +3,11 @@
 // p4: smartRetryBackoff — exponential jitter retry
 // p9: randomTlsPacing — random microsecond delay before TLS handshake
 // p17: captivePortalDetector — enhanced cert validation
+// cf1: cfHttpProbe — HTTP GET /cdn-cgi/trace + colo detection (Cloudflare SNIs)
 
 export '../models/probe_result.dart';
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
@@ -16,33 +18,20 @@ const kShiroAlpn = 'http/1.1';
 final _probeRng = Random();
 
 // ── SNI presets for ShirKhorshid CDN ────────────────────────────────────────
-// Sources:
-//   1. Wireshark pcap analysis of ShirKhorshid (confirmed SNI=www.google.com)
-//   2. Python scanner (MidONeScanner.py) CDN_MAP
-//   3. Domain fronting research (2025): Fastly/Akamai still partially viable
-//
-// Priority groups for deep mode:
-//   Group 1 (Google-family): www.google.com, google.com, fonts.googleapis.com
-//   Group 2 (Cloudflare):    speed.cloudflare.com, cloudflare.com
-//   Group 3 (Akamai/Fastly): a248.e.akamai.net, global.fastly.net, github.com
-//   Group 4 (Other):         ajax.aspnetcdn.com
-//
-// If a Google-family SNI passes, skip remaining Google-family.
-// Order matters: best known first.
 const kDeepSniPresets = [
-  'www.google.com',        // ★ PRIMARY — confirmed by ShirKhorshid Wireshark
-  'google.com',            // Google CDN fallback
-  'fonts.googleapis.com',  // Google APIs CDN
-  'speed.cloudflare.com',  // Cloudflare — best for bandwidth test (/__down)
-  'cloudflare.com',        // Cloudflare fallback
-  'a248.e.akamai.net',     // Akamai — valid cert, partial fronting
-  'global.fastly.net',     // Fastly — fronting may still work
-  'github.com',            // GitHub (Fastly-backed)
-  'ajax.aspnetcdn.com',    // Microsoft CDN
+  'www.google.com',
+  'google.com',
+  'fonts.googleapis.com',
+  'speed.cloudflare.com',
+  'cloudflare.com',
+  'a248.e.akamai.net',
+  'global.fastly.net',
+  'github.com',
+  'ajax.aspnetcdn.com',
 ];
 
 // SNI family groups for early-exit in deep mode
-const kSniGoogleFamily    = {'www.google.com', 'google.com', 'fonts.googleapis.com'};
+const kSniGoogleFamily     = {'www.google.com', 'google.com', 'fonts.googleapis.com'};
 const kSniCloudflareFamily = {'speed.cloudflare.com', 'cloudflare.com'};
 
 // ── Probe result with separate TCP/TLS timing ───────────────────────────────
@@ -59,27 +48,16 @@ class ProbeTimings {
 }
 
 // ── p17: Captive portal detection ────────────────────────────────────────────
-// Returns true if the cert looks like a captive portal injection.
 bool isCaptivePortalCert(X509Certificate cert) {
-  // Extremely short PEM = almost certainly captive portal / transparent proxy
   if (cert.pem.length < 300) return true;
   return false;
 }
 
 // ── Cert validation helper ───────────────────────────────────────────────────
-// onBadCertificate callback: accept CDN fronting (SNI mismatch) but reject
-// captive portals and transparent proxies that intercept with no real cert.
-//
-// Strategy:
-//   - pem.isEmpty  → no real cert, reject (captive portal / null cert)
-//   - pem.length < 200 → suspiciously short, likely fake
-//   - otherwise    → real cert, accept (CDN fronting is intentional)
-//
-// Public so tunnel_engine.dart can reuse the same policy.
 bool acceptCdnCert(X509Certificate cert) {
   if (cert.pem.isEmpty) return false;
-  if (cert.pem.length < 200) return false; // ISP injection / transparent proxy
-  return true; // real cert — SNI mismatch ok for CDN fronting
+  if (cert.pem.length < 200) return false;
+  return true;
 }
 
 Future<({double latencyMs, int retransmits, ProbeTimings? timings})?> androidTlsProbe(
@@ -99,8 +77,6 @@ Future<({double latencyMs, int retransmits, ProbeTimings? timings})?> androidTls
     );
     final tcpMs = sw.elapsedMicroseconds / 1000.0;
 
-    // p9: randomTlsPacing — add random microsecond delay before TLS handshake
-    // Reduces robotic fingerprint pattern
     await Future.delayed(
       Duration(microseconds: 100 + _probeRng.nextInt(900)),
     );
@@ -116,7 +92,6 @@ Future<({double latencyMs, int retransmits, ProbeTimings? timings})?> androidTls
     final totalMs = sw.elapsedMicroseconds / 1000.0;
     final tlsMs   = totalMs - tcpMs;
 
-    // Drain a tiny bit to confirm ApplicationData (Phase 4)
     final completer = Completer<void>();
     StreamSubscription? sub;
     sub = tls.listen(
@@ -146,7 +121,6 @@ Future<({double latencyMs, int retransmits, ProbeTimings? timings})?> androidTls
 }
 
 // p4: smartRetryBackoff — exponential jitter retry
-// Delays: 300ms → ~700ms → ~1500ms with jitter (clamped to 3000ms)
 Future<({double latencyMs, int retransmits, ProbeTimings? timings})?> probeWithRetry(
   String ip, {
   String sni   = kShiroSni,
@@ -156,20 +130,16 @@ Future<({double latencyMs, int retransmits, ProbeTimings? timings})?> probeWithR
     final r = await androidTlsProbe(ip, sni: sni);
     if (r != null) return r;
     if (i < retries - 1) {
-      // Exponential backoff with jitter: base * 2^i + random 0-200ms
-      final baseMs = (300 * pow(2, i)).toInt();
+      final baseMs   = (300 * pow(2, i)).toInt();
       final jitterMs = _probeRng.nextInt(200);
-      final delayMs = (baseMs + jitterMs).clamp(300, 3000);
+      final delayMs  = (baseMs + jitterMs).clamp(300, 3000);
       await Future.delayed(Duration(milliseconds: delayMs));
     }
   }
   return null;
 }
 
-// ── Quick TLS pre-filter ─────────────────────────────────────────────────────
-// p5: quickTlsHelloProbe — Full SYN → ClientHello → ServerHello check.
-// More accurate than TCP-only: catches TLS blackholes early.
-// Uses same cert policy as main probes.
+// p5: quickTlsHelloProbe
 Future<bool> quickTlsCheck(String ip, {int timeoutMs = 3000}) async {
   Socket?       rawSock;
   SecureSocket? tls;
@@ -179,7 +149,6 @@ Future<bool> quickTlsCheck(String ip, {int timeoutMs = 3000}) async {
       timeout: Duration(milliseconds: timeoutMs),
     );
 
-    // p9: small random pacing
     await Future.delayed(
       Duration(microseconds: 50 + _probeRng.nextInt(450)),
     );
@@ -199,12 +168,10 @@ Future<bool> quickTlsCheck(String ip, {int timeoutMs = 3000}) async {
   }
 }
 
-// ── p1: Adaptive timeout based on measured RTT ──────────────────────────────
-// p1: adaptiveTimeoutEngine — timeout based on RTT + optional subnet hint
+// p1: adaptiveTimeoutEngine
 int adaptiveServerHelloMs(double firstRttMs, {int? subnetHintMs}) {
   final rttBased = (firstRttMs * 3).clamp(6000, 15000).toInt();
   if (subnetHintMs != null) {
-    // Blend RTT-based and subnet-based hints
     return ((rttBased + subnetHintMs) ~/ 2).clamp(4000, 15000);
   }
   return rttBased;
@@ -213,11 +180,11 @@ int adaptiveServerHelloMs(double firstRttMs, {int? subnetHintMs}) {
 // ── Bandwidth measurement ────────────────────────────────────────────────────
 Future<double?> measureBandwidthKBs(
   String ip, {
-  String sni        = kShiroSni,
+  String sni         = kShiroSni,
   int testDurationMs = 5000,
 }) async {
-  Socket?       rawSock;
-  SecureSocket? tls;
+  Socket?             rawSock;
+  SecureSocket?       tls;
   StreamSubscription? sub;
   try {
     rawSock = await Socket.connect(
@@ -282,6 +249,116 @@ Future<double?> measureBandwidthKBs(
     try { tls?.destroy();     } catch (_) {}
     try { rawSock?.destroy(); } catch (_) {}
   }
+}
+
+// ── cf1: Cloudflare HTTP probe ───────────────────────────────────────────────
+// Sends GET /cdn-cgi/trace to confirm the IP is a real Cloudflare edge and
+// reads the datacenter (colo) identifier.
+// Budget-split timeout: TCP = total/4, TLS = total/2, HTTP = total/4.
+class CfHttpResult {
+  final bool   tlsOk;
+  final int    httpStatus; // HTTP status code; -1 if request failed
+  final String colo;       // CF datacenter code e.g. "FRA"; "" if not detected
+
+  const CfHttpResult({
+    required this.tlsOk,
+    required this.httpStatus,
+    required this.colo,
+  });
+
+  /// True only when the IP is confirmed as a live Cloudflare edge.
+  bool get isCloudflareEdge =>
+      tlsOk && httpStatus >= 200 && httpStatus < 400 && colo.isNotEmpty;
+}
+
+Future<CfHttpResult> cfHttpProbe(
+  String ip, {
+  String sni        = 'speed.cloudflare.com',
+  int totalBudgetMs = 8000,
+}) async {
+  Socket?             raw;
+  SecureSocket?       tls;
+  StreamSubscription? sub;
+  try {
+    // TCP — 25% of budget
+    raw = await Socket.connect(
+      ip, 443,
+      timeout: Duration(milliseconds: totalBudgetMs ~/ 4),
+    );
+
+    // p9: random pacing before TLS handshake
+    await Future.delayed(Duration(microseconds: 100 + _probeRng.nextInt(900)));
+
+    // TLS — 50% of budget
+    tls = await SecureSocket.secure(
+      raw,
+      host: sni,
+      onBadCertificate: acceptCdnCert,
+    ).timeout(Duration(milliseconds: totalBudgetMs ~/ 2));
+
+    // HTTP GET /cdn-cgi/trace — 25% of budget
+    tls.write(
+      'GET /cdn-cgi/trace HTTP/1.1\r\n'
+      'Host: $sni\r\n'
+      'User-Agent: MidONe/1.0\r\n'
+      'Connection: close\r\n\r\n',
+    );
+
+    final buf       = StringBuffer();
+    final completer = Completer<void>();
+    sub = tls.listen(
+      (chunk) {
+        buf.write(utf8.decode(chunk, allowMalformed: true));
+        // Stop after enough data for headers + body
+        if (buf.length > 2048 && !completer.isCompleted) completer.complete();
+      },
+      onDone:        () { if (!completer.isCompleted) completer.complete(); },
+      onError:       (_) { if (!completer.isCompleted) completer.complete(); },
+      cancelOnError: true,
+    );
+
+    await completer.future
+        .timeout(Duration(milliseconds: totalBudgetMs ~/ 4))
+        .catchError((_) {});
+
+    await sub.cancel();
+
+    final response   = buf.toString();
+    final httpStatus = _cfParseHttpStatus(response);
+    final colo       = _cfParseColo(response);
+
+    return CfHttpResult(tlsOk: true, httpStatus: httpStatus, colo: colo);
+  } catch (_) {
+    return const CfHttpResult(tlsOk: false, httpStatus: -1, colo: '');
+  } finally {
+    try { await sub?.cancel(); } catch (_) {}
+    try { tls?.destroy();      } catch (_) {}
+    try { raw?.destroy();      } catch (_) {}
+  }
+}
+
+/// Parses HTTP status code from raw HTTP response.
+/// e.g. "HTTP/1.1 200 OK" → 200
+int _cfParseHttpStatus(String response) {
+  final match = RegExp(r'HTTP/1\.\d (\d{3})').firstMatch(response);
+  return int.tryParse(match?.group(1) ?? '') ?? -1;
+}
+
+/// Parses Cloudflare datacenter code from response.
+/// Tries body first ("colo=FRA"), then CF-Ray header ("CF-Ray: 12345-FRA").
+String _cfParseColo(String response) {
+  // From /cdn-cgi/trace body: "colo=FRA"
+  final bodyMatch = RegExp(r'colo=([A-Z]{2,4})').firstMatch(response);
+  if (bodyMatch != null) return bodyMatch.group(1)!;
+
+  // From CF-Ray response header: "CF-Ray: 8abc123-FRA"
+  final rayMatch = RegExp(
+    r'CF-Ray:\s*\S+-([A-Z]{3})',
+    caseSensitive: false,
+  ).firstMatch(response);
+  if (rayMatch != null) return rayMatch.group(1)!.toUpperCase();
+
+  return '';
 }
 
 // ProbeResult is defined in models/probe_result.dart (re-exported above)
