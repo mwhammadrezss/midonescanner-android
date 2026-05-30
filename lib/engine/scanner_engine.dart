@@ -322,6 +322,7 @@ Future<List<ScanResult>> runScanningEngine(
   void Function(int liveCount, int totalCount)? onPrefilterDone,
   bool Function()? isCancelled,
   String? normalSniOverride,
+  bool isCfScan           = false,
 }) async {
   // ── Deep mode: delegate entirely to the 7-stage deep scan engine ──────────
   if (mode == ScanMode.deep) {
@@ -410,7 +411,7 @@ Future<List<ScanResult>> runScanningEngine(
 
     try {
       if (cancelCheck()) return;
-      final r = await scanOneIp(ip, mode: mode, snis: deepSnis, normalSniOverride: normalSniOverride);
+      final r = await scanOneIp(ip, mode: mode, snis: deepSnis, normalSniOverride: normalSniOverride, isCfScan: isCfScan);
       results.add(r);
       done++;
       onProgress?.call(done, totalLive, r);
