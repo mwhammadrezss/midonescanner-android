@@ -71,6 +71,13 @@ class ScanResult {
   // Mirrors SenPai WSOk field.
   final bool?     wsOk;
 
+  // ── Deep scan CDN fields ──────────────────────────────────────────────────
+  // Populated by runDeepScanEngine (7-stage pipeline).
+  // bestFamily: best CDN family name e.g. 'Cloudflare', 'Google', 'Akamai'
+  // h2Supported: true = ALPN negotiated 'h2' during Stage 4
+  final String?   bestFamily;
+  final bool?     h2Supported;
+
   const ScanResult({
     required this.ip,
     required this.latencyMs,
@@ -96,6 +103,8 @@ class ScanResult {
     this.httpStatus,
     this.colo,
     this.wsOk,
+    this.bestFamily,
+    this.h2Supported,
   });
 
   String get phaseLabel {
