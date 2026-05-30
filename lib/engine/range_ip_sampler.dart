@@ -6,6 +6,8 @@ import 'dart:math';
 class RangeIpSampler {
   /// Samples up to [requestedCount] random IPs from [allCidrs],
   /// excluding any IP already in [alreadyScanned].
+  ///
+  /// Yields to the event loop every 10,000 iterations to keep UI responsive.
   static Future<List<String>> sample({
     required List<String> allCidrs,
     required int requestedCount,
@@ -20,14 +22,9 @@ class RangeIpSampler {
       final (network, total) = _cidrToNetworkAndTotal(cidr);
       if (total <= 0) continue;
 
-      final startOffset = cidr.contains('/') &&
-              int.parse(cidr.split('/')[1]) >= 31
-          ? 0
-          : 1;
-      final endOffset =
-          cidr.contains('/') && int.parse(cidr.split('/')[1]) >= 31
-              ? total
-              : total - 1;
+      final prefix = int.parse(cidr.split('/')[1]);
+      final startOffset = prefix >= 31 ? 0 : 1;
+      final endOffset   = prefix >= 31 ? total : total - 1;
       final usable = endOffset - startOffset;
       if (usable <= 0) continue;
 
@@ -37,11 +34,16 @@ class RangeIpSampler {
         // Small CIDR: generate all indices, shuffle, pick non-scanned
         final indices = List<int>.generate(usable, (i) => startOffset + i);
         indices.shuffle(rng);
+        int batchCount = 0;
         for (final idx in indices) {
           if (collected.length >= requestedCount) break;
           final ip = _indexToIp(network, idx);
           if (!alreadyScanned.contains(ip)) {
             collected.add(ip);
+          }
+          // Yield every 10k iterations to keep UI responsive
+          if (++batchCount % 10000 == 0) {
+            await Future.microtask(() {});
           }
         }
       } else {
@@ -52,12 +54,20 @@ class RangeIpSampler {
         while (seen.length < sampleSize && attempts < sampleSize * 3) {
           seen.add(startOffset + rng.nextInt(usable));
           attempts++;
+          // Yield every 10k iterations
+          if (attempts % 10000 == 0) {
+            await Future.microtask(() {});
+          }
         }
+        int batchCount = 0;
         for (final idx in seen) {
           if (collected.length >= requestedCount) break;
           final ip = _indexToIp(network, idx);
           if (!alreadyScanned.contains(ip)) {
             collected.add(ip);
+          }
+          if (++batchCount % 10000 == 0) {
+            await Future.microtask(() {});
           }
         }
       }
