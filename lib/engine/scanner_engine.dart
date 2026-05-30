@@ -36,6 +36,7 @@ Future<ScanResult> scanOneIp(
   ScanMode mode        = ScanMode.normal,
   List<String>? snis,
   bool Function()? isCancelled,
+  String? normalSniOverride,
 }) async {
   _currentIsCancelled = isCancelled;
   final (country, flag) = GeoIPOffline().lookupFull(ip);
@@ -75,14 +76,15 @@ Future<ScanResult> scanOneIp(
 
   // ─── NORMAL MODE ──────────────────────────────────────────────────────────
   if (mode == ScanMode.normal) {
+    final sniToUse = normalSniOverride ?? kShiroSni;
     final subnetTimeout = SubnetMemoryCache().adaptiveTimeoutHint(ip);
     final result = await _scanWithSni(
-      ip, kShiroSni, survivalTarget, repeats,
+      ip, sniToUse, survivalTarget, repeats,
       country: country, flag: flag, dead: dead,
       subnetTimeoutHint: subnetTimeout,
     );
     if (result.isAlive) {
-      SubnetMemoryCache().recordSuccess(ip, result.latencyMs, kShiroSni);
+      SubnetMemoryCache().recordSuccess(ip, result.latencyMs, sniToUse);
       SoftBlacklist().recordSuccess(ip);
     } else {
       SubnetMemoryCache().recordFailure(ip);
@@ -286,6 +288,7 @@ Future<List<ScanResult>> runScanningEngine(
   void Function(int done, int total, ScanResult result)? onProgress,
   void Function(int liveCount, int totalCount)? onPrefilterDone,
   bool Function()? isCancelled,
+  String? normalSniOverride,
 }) async {
   final results     = <ScanResult>[];
   int   done        = 0;
@@ -374,7 +377,7 @@ Future<List<ScanResult>> runScanningEngine(
 
     try {
       if (cancelCheck()) return;
-      final r = await scanOneIp(ip, mode: mode, snis: deepSnis);
+      final r = await scanOneIp(ip, mode: mode, snis: deepSnis, normalSniOverride: normalSniOverride);
       results.add(r);
       done++;
       onProgress?.call(done, totalLive, r);
