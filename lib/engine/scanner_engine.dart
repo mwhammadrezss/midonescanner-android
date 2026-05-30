@@ -160,6 +160,28 @@ Future<ScanResult> _scanWithSni(
 
   final firstTimings = first.timings;
 
+  // ── cf1: Cloudflare HTTP probe — run immediately after first TLS success ──
+  // Mirrors SenPai probeHTTP: confirms real CF edge + captures colo BEFORE
+  // committing to the expensive 20s survival test.
+  // If this IP fails the CF HTTP check, skip it immediately (not a real CF edge).
+  int?    cfHttpStatus;
+  String? cfColo;
+  if (kSniCloudflareFamily.contains(sni)) {
+    final cfResult = await cfHttpProbe(ip, sni: sni);
+    cfHttpStatus = cfResult.httpStatus;
+    cfColo       = cfResult.colo.isNotEmpty ? cfResult.colo : null;
+    StructuredLogger().log(
+      phase: 'cf_http',
+      ip: ip,
+      sni: sni,
+      event: 'status=$cfHttpStatus colo=${cfColo ?? "?"}',
+    );
+    // If not a confirmed CF edge, fail fast — skip survival test
+    if (!cfResult.isCloudflareEdge) {
+      return dead(ScanPhase.tlsFail);
+    }
+  }
+
   final samples = <double>[first.latencyMs];
   int   failed  = 0;
 
@@ -213,22 +235,7 @@ Future<ScanResult> _scanWithSni(
     speedKBs = await measureBandwidthKBs(ip, sni: sni);
   }
 
-  // ── cf1: Cloudflare HTTP probe ─────────────────────────────────────────────
-  // Only run for Cloudflare-family SNIs on alive IPs.
-  // Confirms the IP is a real CF edge and captures the datacenter (colo).
-  int?    cfHttpStatus;
-  String? cfColo;
-  if (isAlive && kSniCloudflareFamily.contains(sni)) {
-    final cfResult = await cfHttpProbe(ip, sni: sni);
-    cfHttpStatus = cfResult.httpStatus;
-    cfColo       = cfResult.colo.isNotEmpty ? cfResult.colo : null;
-    StructuredLogger().log(
-      phase: 'cf_http',
-      ip: ip,
-      sni: sni,
-      event: 'status=$cfHttpStatus colo=${cfColo ?? "?"}',
-    );
-  }
+  // cf1: cfHttpProbe already ran above (before survival test) for Cloudflare SNIs
 
   final trustBonus = SubnetMemoryCache().trustBonus(ip);
 
