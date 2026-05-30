@@ -83,6 +83,7 @@ Future<ScanResult> scanOneIp(
       ip, sniToUse, survivalTarget, repeats,
       country: country, flag: flag, dead: dead,
       subnetTimeoutHint: subnetTimeout,
+      runCfProbe: isCfScan,
     );
     if (result.isAlive) {
       SubnetMemoryCache().recordSuccess(ip, result.latencyMs, sniToUse);
@@ -110,6 +111,7 @@ Future<ScanResult> scanOneIp(
       ip, sni, survivalTarget, repeats,
       country: country, flag: flag, dead: dead,
       subnetTimeoutHint: subnetTimeout,
+      runCfProbe: kSniCloudflareFamily.contains(sni) || isCfScan,
     );
 
     if (candidate.tier != IpTier.dead && candidate.tier != IpTier.weak) {
@@ -150,6 +152,7 @@ Future<ScanResult> _scanWithSni(
   required String flag,
   required ScanResult Function(ScanPhase) dead,
   int? subnetTimeoutHint,
+  bool runCfProbe = false,
 }) async {
   StructuredLogger().log(phase: 'probe_start', ip: ip, sni: sni);
 
