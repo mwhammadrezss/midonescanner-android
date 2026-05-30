@@ -155,6 +155,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // p54: scan profile
   String _selectedProfile = 'balanced';
 
+  // CDN profile for Normal mode
+  String _normalCdnProfile = 'cdn_akamai'; // 'cdn_akamai' or 'cloudflare'
+
   // p55: hidden dev mode
   // BUG 10 FIX: added timestamp to enforce 2-second tap window
   int _titleTapCount = 0;
@@ -429,11 +432,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     _startBatchTimer();
 
+    // CDN profile SNI override — only applies in Normal mode
+    String? normalSniOverride;
+    if (_mode == 1 && _normalCdnProfile == 'cloudflare') {
+      normalSniOverride = 'speed.cloudflare.com';
+    }
+    // 'cdn_akamai' leaves normalSniOverride null → engine uses default kShiroSni
+
     runScanningEngine(
       ips,
       mode: _mode == 2 ? ScanMode.deep : ScanMode.normal,
       concurrency: activeProfile.concurrency,  // BUG 6 FIX: pass profile concurrency
       deepSnis: deepSnis,
+      normalSniOverride: normalSniOverride,
       onPrefilterDone: (liveCount, totalCount) {
         if (!mounted) return;
         setState(() {
@@ -941,6 +952,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         children: [
           _buildModeCard(),
           const SizedBox(height: 10),
+          if (_mode == 1) _buildNormalCdnProfileCard(),
+          if (_mode == 1) const SizedBox(height: 10),
           _buildProfileCard(),        // p54
           const SizedBox(height: 10),
           _buildInputCard(),
@@ -957,6 +970,52 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             _buildViewResultsButton(),
           ],
         ],
+      ),
+    );
+  }
+
+  // CDN profile selector — Normal mode only
+  Widget _buildNormalCdnProfileCard() {
+    return _card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('CDN PROFILE',
+              style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _buildCdnProfileBtn('cdn_akamai', 'CDN Akamai'),
+              const SizedBox(width: 4),
+              _buildCdnProfileBtn('cloudflare', 'Cloudflare'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCdnProfileBtn(String value, String label) {
+    final active = _normalCdnProfile == value;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _normalCdnProfile = value),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          margin: const EdgeInsets.symmetric(horizontal: 2),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: active ? accentLime.withOpacity(0.12) : iconBg,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: active ? accentLime : borderColor, width: active ? 1.5 : 1),
+          ),
+          child: Text(label,
+              style: GoogleFonts.inter(
+                  color: active ? accentLime : textSecond,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700),
+              textAlign: TextAlign.center),
+        ),
       ),
     );
   }
