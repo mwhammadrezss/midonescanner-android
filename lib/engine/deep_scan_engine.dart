@@ -109,11 +109,12 @@ Future<_FamilyResult> _probeFamilyForIp(
     if (isCancelled()) {
       return _FamilyResult(family: family.name, bestSni: sni, latencyMs: 9999, tlsMs: 9999, alive: false);
     }
-    final remaining = (25000 - totalSw.elapsedMilliseconds).clamp(0, familyBudgetMs);
+    // FIX BUG-1: clamp() on int returns num, not int — use .toInt()
+    final remaining = (25000 - totalSw.elapsedMilliseconds).clamp(0, familyBudgetMs).toInt();
     if (remaining < 500) {
       return _FamilyResult(family: family.name, bestSni: sni, latencyMs: 9999, tlsMs: 9999, alive: false);
     }
-    final timeoutMs = remaining.clamp(500, familyBudgetMs);
+    final timeoutMs = remaining.clamp(500, familyBudgetMs).toInt();
 
     Socket?       rawSock;
     SecureSocket? tls;
@@ -133,7 +134,7 @@ Future<_FamilyResult> _probeFamilyForIp(
       final totalMs = sw.elapsedMicroseconds / 1000.0;
       final tlsMs   = totalMs - tcpMs;
 
-      try { await tls.close(); } catch (_) {}
+      try { await tls.close().timeout(const Duration(seconds: 3)); } catch (_) {}
       tls.destroy();
       rawSock.destroy();
 
@@ -194,7 +195,7 @@ Future<bool> _checkH2Alpn(String ip, String sni) async {
       supportedProtocols: ['h2', 'http/1.1'],
     ).timeout(const Duration(seconds: 6));
     final isH2 = tls.selectedProtocol == 'h2';
-    try { await tls.close(); } catch (_) {}
+    try { await tls.close().timeout(const Duration(seconds: 3)); } catch (_) {}
     tls.destroy();
     return isH2;
   } catch (_) {
@@ -220,8 +221,8 @@ Future<double> _testConnectionReuse(
     if (i < 2) await Future.delayed(const Duration(milliseconds: 300));
   }
   if (latencies.isEmpty) return 0.0;
-  final successRate  = latencies.length / 3.0;
-  final jitter       = latencies.length >= 2 ? calcJitter(latencies) : 0.0;
+  final successRate   = latencies.length / 3.0;
+  final jitter        = latencies.length >= 2 ? calcJitter(latencies) : 0.0;
   final jitterPenalty = (jitter / 500.0).clamp(0.0, 0.5);
   return (successRate - jitterPenalty).clamp(0.0, 1.0);
 }
@@ -231,9 +232,12 @@ Future<double> _testConnectionReuse(
 //   Phase 1 — 2s idle hold: detects DPI that RSTs idle TLS connections
 //   Phase 2 — WS Upgrade:   detects DPI that filters WebSocket headers
 //
-// Returns true (bonus) / false (no bonus) / null (skipped).
 // NEVER rejects an IP. Only used as +5 score bonus.
 // Sec-WebSocket-Key is randomly generated per-call (not a fixed fingerprint).
+//
+// FIX BUG-2: Do NOT use tls.first — it consumes the single-subscription stream
+// and makes tls.listen() crash with "Bad state: Stream already listened to".
+// Instead, open ONE StreamSubscription at the start and reuse it for both phases.
 Future<bool?> _wsBonus(
   String ip,
   String sni, {
@@ -241,13 +245,14 @@ Future<bool?> _wsBonus(
 }) async {
   Socket?       raw;
   SecureSocket? tls;
+  StreamSubscription<List<int>>? sub;
 
-  // Generate a random base64 WS key (16 random bytes)
+  // Random base64 WS key (16 random bytes) — not a fixed fingerprint
   final keyBytes = List<int>.generate(16, (_) => _rng.nextInt(256));
   final wsKey    = base64.encode(keyBytes);
 
   try {
-    // TCP + TLS — 1/3 of budget
+    // TCP + TLS — 1/3 of budget each
     raw = await Socket.connect(
       ip, 443,
       timeout: Duration(milliseconds: totalBudgetMs ~/ 3),
@@ -258,20 +263,42 @@ Future<bool?> _wsBonus(
       onBadCertificate: acceptCdnCert,
     ).timeout(Duration(milliseconds: totalBudgetMs ~/ 3));
 
+    tls.setOption(SocketOption.tcpNoDelay, true);
+
     // ── Phase 1: 2s idle hold ────────────────────────────────────────────────
-    // Timeout is expected (server waits for us). Any other error = DPI kill.
-    bool idleKilled = false;
+    // Open ONE subscription here and keep it alive for Phase 2 as well.
+    // Timeout is EXPECTED (server is waiting for us to speak first).
+    // Any non-timeout error (RST / EOF) = DPI killed the connection.
+    bool idleKilled       = false;
+    final idleCompleter   = Completer<void>();
+
+    sub = tls.listen(
+      (_) {
+        // Server pushed data before we sent anything — unexpected but OK
+        if (!idleCompleter.isCompleted) idleCompleter.complete();
+      },
+      onError: (_) {
+        idleKilled = true;
+        if (!idleCompleter.isCompleted) idleCompleter.complete();
+      },
+      onDone: () {
+        idleKilled = true;
+        if (!idleCompleter.isCompleted) idleCompleter.complete();
+      },
+      cancelOnError: false,
+    );
+
     try {
-      tls.setOption(SocketOption.tcpNoDelay, true);
-      await tls.first.timeout(const Duration(seconds: 2));
+      await idleCompleter.future.timeout(const Duration(seconds: 2));
     } on TimeoutException {
-      // expected — connection alive
-    } catch (_) {
-      idleKilled = true;
+      // Expected — server is waiting, connection alive
     }
+
     if (idleKilled) return false;
 
     // ── Phase 2: WebSocket Upgrade ───────────────────────────────────────────
+    // Reuse the same subscription, just swap out the onData/onDone/onError
+    // handlers — this avoids opening a second subscription (which would throw).
     final wsRequest =
         'GET / HTTP/1.1\r\n'
         'Host: $sni\r\n'
@@ -287,34 +314,37 @@ Future<bool?> _wsBonus(
       return false;
     }
 
-    final buf       = StringBuffer();
-    final completer = Completer<bool>();
-    StreamSubscription? sub;
-    sub = tls.listen(
-      (chunk) {
-        buf.write(utf8.decode(chunk, allowMalformed: true));
-        if (buf.toString().contains('HTTP/') && !completer.isCompleted) {
-          completer.complete(true);
-        }
-      },
-      onDone:        () { if (!completer.isCompleted) completer.complete(false); },
-      onError:       (_) { if (!completer.isCompleted) completer.complete(false); },
-      cancelOnError: true,
+    final buf         = StringBuffer();
+    final wsCompleter = Completer<bool>();
+
+    sub.onData((chunk) {
+      buf.write(utf8.decode(chunk, allowMalformed: true));
+      if (buf.toString().contains('HTTP/') && !wsCompleter.isCompleted) {
+        wsCompleter.complete(true);
+      }
+    });
+    sub.onDone(() {
+      if (!wsCompleter.isCompleted) wsCompleter.complete(false);
+    });
+    sub.onError((_) {
+      if (!wsCompleter.isCompleted) wsCompleter.complete(false);
+    });
+
+    final ok = await wsCompleter.future.timeout(
+      Duration(milliseconds: totalBudgetMs ~/ 3),
+      onTimeout: () => false,
     );
 
-    final ok = await completer.future
-        .timeout(
-          Duration(milliseconds: totalBudgetMs ~/ 3),
-          onTimeout: () => false,
-        );
     await sub.cancel();
+    sub = null;
     return ok;
 
   } catch (_) {
     return false;
   } finally {
-    try { tls?.destroy(); } catch (_) {}
-    try { raw?.destroy(); } catch (_) {}
+    try { await sub?.cancel(); } catch (_) {}
+    try { tls?.destroy();      } catch (_) {}
+    try { raw?.destroy();      } catch (_) {}
   }
 }
 
@@ -322,14 +352,14 @@ Future<bool?> _wsBonus(
 // Weights: stability 25%, survival 20%, latency 18%, bandwidth 15%, h2 12%, reuse 10%
 // WS Bonus: +5 only when bestFamily == 'Cloudflare' AND wsOk == true
 double _computeFinalScore({
-  required double stabilityScore,
-  required bool   survived,
-  required int    survivalMs,
-  required double bestLatencyMs,
+  required double  stabilityScore,
+  required bool    survived,
+  required int     survivalMs,
+  required double  bestLatencyMs,
   required double? bandwidthKBs,
-  required bool   h2Supported,
-  required double reuseScore,
-  required bool   wsBonus,
+  required bool    h2Supported,
+  required double  reuseScore,
+  required bool    wsBonus,
 }) {
   // stability (25%)
   final stab = stabilityScore.clamp(0.0, 100.0) / 100.0 * 25.0;
@@ -510,10 +540,10 @@ Future<List<ScanResult>> runDeepScanEngine(
       if (bestFamily == 'Cloudflare') {
         try {
           final wsOk = await _wsBonus(w.ip, bestSni, totalBudgetMs: 8000)
-              .timeout(const Duration(seconds: 10));
+              .timeout(const Duration(seconds: 10), onTimeout: () => false);
           wsBonus = wsOk == true;
         } catch (_) {
-          wsBonus = false; // timeout or any error → no bonus, keep IP
+          wsBonus = false; // any error → no bonus, keep IP
         }
       }
       if (cancelCheck()) return;
@@ -528,9 +558,9 @@ Future<List<ScanResult>> runDeepScanEngine(
       }
 
       // ── Stability score from alive family fraction ────────────────────────
-      final aliveFamilies   = w.families.where((f) => f.alive).length;
-      final stabilityScore  = (aliveFamilies / _kCdnFamilies.length) * 100.0;
-      final reliability     = aliveFamilies / _kCdnFamilies.length;
+      final aliveFamilyCount = w.families.where((f) => f.alive).length;
+      final stabilityScore   = (aliveFamilyCount / _kCdnFamilies.length) * 100.0;
+      final reliability      = aliveFamilyCount / _kCdnFamilies.length;
 
       // ── Final score ───────────────────────────────────────────────────────
       final finalScore = _computeFinalScore(
