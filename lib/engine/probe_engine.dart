@@ -523,8 +523,13 @@ Future<bool> cfWsProbe(
         'Sec-WebSocket-Version: 13\r\n'
         '\r\n';
 
+    // Write deadline — mirrors SenPai: tlsConn.SetDeadline(now + timeout/2)
+    // Dart SecureSocket.write() is an async sink operation. On a stalled TCP
+    // connection the write may block until the kernel buffer drains.
+    // Wrapping in a Future.timeout(budget/2) mirrors SenPai's write deadline.
     try {
-      tls.write(wsRequest);
+      await Future(() => tls!.write(wsRequest))
+          .timeout(Duration(milliseconds: totalBudgetMs ~/ 2));
     } catch (_) {
       return false;
     }
