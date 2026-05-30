@@ -1644,6 +1644,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           Text('${r.latencyMs.toStringAsFixed(0)}ms', style: GoogleFonts.inter(color: accentLime, fontSize: 11)),
           const SizedBox(width: 6),
           Text(r.tierLabel.split(' ').last, style: GoogleFonts.inter(color: tierColor(r.tier), fontSize: 10)),
+          // cf1: datacenter
+          if (r.colo != null) ...[
+            const SizedBox(width: 6),
+            Text(r.colo!, style: GoogleFonts.inter(color: const Color(0xFF00E5FF), fontSize: 10, fontWeight: FontWeight.w600)),
+          ],
+          // ws2: WebSocket DPI result
+          if (r.wsOk != null) ...[
+            const SizedBox(width: 4),
+            Icon(
+              r.wsOk! ? Icons.check_circle_rounded : Icons.block_rounded,
+              size: 12,
+              color: r.wsOk! ? const Color(0xFF00E676) : const Color(0xFFFF5252),
+            ),
+          ],
         ],
       ),
     );
