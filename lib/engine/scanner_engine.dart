@@ -160,40 +160,36 @@ Future<ScanResult> _scanWithSni(
 
   final firstTimings = first.timings;
 
-  // ── cf1: Cloudflare HTTP probe — run immediately after first TLS success ──
+  // ── cf1: Cloudflare HTTP probe — always runs, independent of TLS SNI ──────
+  // Uses speed.cloudflare.com as SNI regardless of what TLS SNI was used.
   // Mirrors SenPai probeHTTP: confirms real CF edge + captures colo BEFORE
   // committing to the expensive 20s survival test.
-  // If this IP fails the CF HTTP check, skip it immediately (not a real CF edge).
-  int?    cfHttpStatus;
-  String? cfColo;
-  bool?   cfWsOk;
-  if (kSniCloudflareFamily.contains(sni)) {
-    final cfResult = await cfHttpProbe(ip, sni: sni);
-    cfHttpStatus = cfResult.httpStatus;
-    cfColo       = cfResult.colo.isNotEmpty ? cfResult.colo : null;
-    StructuredLogger().log(
-      phase: 'cf_http',
-      ip: ip,
-      sni: sni,
-      event: 'status=$cfHttpStatus colo=${cfColo ?? "?"}',
-    );
-    // If not a confirmed CF edge, fail fast — skip survival test
-    if (!cfResult.isCloudflareEdge) {
-      return dead(ScanPhase.tlsFail);
-    }
-
-    // ── ws2: WebSocket DPI probe — run immediately after CF HTTP confirmed ──
-    // Mirrors SenPai probeHTTP → probeWebSocket call.
-    // Only runs when cfHttpProbe confirmed a real CF edge.
-    final wsResult = await cfWsProbe(ip, sni: sni);
-    cfWsOk = wsResult;
-    StructuredLogger().log(
-      phase: 'cf_ws',
-      ip: ip,
-      sni: sni,
-      event: 'wsOk=$wsResult',
-    );
+  // If this IP is NOT a real CF edge → fail fast, skip survival test.
+  const _cfProbeSni = 'speed.cloudflare.com';
+  final cfResult = await cfHttpProbe(ip, sni: _cfProbeSni);
+  final int?    cfHttpStatus = cfResult.httpStatus;
+  final String? cfColo       = cfResult.colo.isNotEmpty ? cfResult.colo : null;
+  StructuredLogger().log(
+    phase: 'cf_http',
+    ip: ip,
+    sni: _cfProbeSni,
+    event: 'status=$cfHttpStatus colo=${cfColo ?? "?"}',
+  );
+  // Not a confirmed CF edge → fail fast
+  if (!cfResult.isCloudflareEdge) {
+    return dead(ScanPhase.tlsFail);
   }
+
+  // ── ws2: WebSocket DPI probe — runs after CF HTTP confirmed ─────────────
+  // Always uses speed.cloudflare.com — independent of TLS SNI.
+  // Mirrors SenPai probeHTTP → probeWebSocket call.
+  final bool? cfWsOk = await cfWsProbe(ip, sni: _cfProbeSni);
+  StructuredLogger().log(
+    phase: 'cf_ws',
+    ip: ip,
+    sni: _cfProbeSni,
+    event: 'wsOk=$cfWsOk',
+  );
 
   final samples = <double>[first.latencyMs];
   int   failed  = 0;
