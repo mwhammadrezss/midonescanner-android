@@ -179,7 +179,10 @@ class _RangeHistoryPageState extends State<RangeHistoryPage> {
         provider == 'akamai' ? '🌐 Akamai' : '☁️ Cloudflare';
     final cidr = session['cidr'] as String? ?? '';
     final time = _formatDate(session['time'] as String? ?? '');
-    final topIps = (session['topIps'] as List?)?.cast<Map>() ?? [];
+    final topIps = (session['topIps'] as List?)
+            ?.map((e) => Map<String, dynamic>.from(e as Map))
+            .toList() ??
+        [];
     final avgRtt = (session['avgLatencyMs'] as num?)?.toDouble() ?? 0.0;
     final aliveCount = (session['aliveCount'] as num?)?.toInt() ?? 0;
     final deadCount = (session['deadCount'] as num?)?.toInt() ?? 0;

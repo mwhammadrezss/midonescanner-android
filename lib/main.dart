@@ -210,7 +210,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     RangeScanStorage().scannedIpCount().then((count) {
       if (mounted) setState(() => _scannedIpMemoryCount = count);
     });
-    _loadRangeCidrs();
+    // Use addPostFrameCallback so setState inside _loadRangeCidrs
+    // runs after the first build frame — avoids setState-in-initState warning.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadRangeCidrs();
+    });
   }
 
   @override
@@ -1062,8 +1066,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           const SizedBox(height: 10),
           if (_mode == 1) _buildNormalCdnProfileCard(),
           if (_mode == 1) const SizedBox(height: 10),
-          _buildProfileCard(),        // p54
-          const SizedBox(height: 10),
+          if (_mode != 3) _buildProfileCard(),   // p54 — hidden in Range mode
+          if (_mode != 3) const SizedBox(height: 10),
           _buildInputCard(),
           const SizedBox(height: 10),
           _buildScanButton(),
@@ -1192,15 +1196,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _modeBtn(int mode, String title, String sub) {
     final active = _mode == mode;
     return GestureDetector(
-      onTap: () => setState(() {
-        _mode = mode;
-        if (mode != 3) {
-          // Clear range state when leaving Range mode
-          _rangeCidrs = [];
-          _selectedRangeCidr = null;
-          _loadingRangeCidrs = false;
+      onTap: () {
+        setState(() {
+          _mode = mode;
+          if (mode != 3) {
+            // Clear range state when leaving Range mode
+            _rangeCidrs = [];
+            _selectedRangeCidr = null;
+            _loadingRangeCidrs = false;
+          }
+        });
+        // Reload CIDRs when switching back to Range mode if list was cleared
+        if (mode == 3 && _rangeCidrs.isEmpty) {
+          _loadRangeCidrs();
         }
-      }),
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
