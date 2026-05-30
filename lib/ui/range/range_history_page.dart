@@ -99,7 +99,7 @@ class _RangeHistoryPageState extends State<RangeHistoryPage> {
       final min = dt.minute.toString().padLeft(2, '0');
       return '$d $m $y $h:$min';
     } catch (_) {
-      return isoDate.substring(0, 16);
+      return isoDate.length >= 16 ? isoDate.substring(0, 16) : isoDate;
     }
   }
 

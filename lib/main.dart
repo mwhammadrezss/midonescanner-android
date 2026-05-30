@@ -367,31 +367,49 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return;
       }
 
-      setState(() => _statusText = 'Building random IP sample...');
+      // Lock the scan button immediately — awaits below would leave it
+      // unlocked for the duration of IP sampling, allowing double-taps.
+      if (_scanning) return;
+      setState(() {
+        _scanning = true;
+        _cancelled = false;
+        _statusText = 'Building random IP sample...';
+      });
 
-      final alreadyScanned = await RangeScanStorage().loadScannedIps();
+      try {
+        final alreadyScanned = await RangeScanStorage().loadScannedIps();
 
-      final sampledIps = await RangeIpSampler.sample(
-        allCidrs: [_selectedRangeCidr!],
-        requestedCount: requestedCount,
-        alreadyScanned: alreadyScanned,
-      );
+        final sampledIps = await RangeIpSampler.sample(
+          allCidrs: [_selectedRangeCidr!],
+          requestedCount: requestedCount,
+          alreadyScanned: alreadyScanned,
+        );
 
-      if (sampledIps.isEmpty) {
-        setState(() => _statusText = 'All IPs in this range already scanned.');
-        _showSnack('No new IPs to scan. Go to History → Reset to start fresh.');
-        return;
+        if (sampledIps.isEmpty) {
+          setState(() {
+            _scanning = false;
+            _statusText = 'All IPs in this range already scanned.';
+          });
+          _showSnack('No new IPs to scan. Go to History → Reset to start fresh.');
+          return;
+        }
+
+        final bool isCf = _rangeCdnProfile == 'cloudflare';
+        _runScan(
+          sampledIps,
+          null,
+          isRangeScan: true,
+          rangeCfMode: isCf,
+          rangeCidr: _selectedRangeCidr,
+          rangeRequestedCount: requestedCount,
+        );
+      } catch (e) {
+        setState(() {
+          _scanning = false;
+          _statusText = 'Error preparing scan: $e';
+        });
+        _showSnack('Error: $e');
       }
-
-      final bool isCf = _rangeCdnProfile == 'cloudflare';
-      _runScan(
-        sampledIps,
-        null,
-        isRangeScan: true,
-        rangeCfMode: isCf,
-        rangeCidr: _selectedRangeCidr,
-        rangeRequestedCount: requestedCount,
-      );
       return;
     }
 
@@ -455,7 +473,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _scanStartTime = DateTime.now(); // p43
     _dpiKills = 0; // p36 reset
     // BUG 6 FIX: resolve active profile and pass concurrency to engine
+    // Range mode doesn't show SCAN PROFILE card → use fixed concurrency of 8
     final activeProfile = getProfile(_selectedProfile);
+    final effectiveConcurrency = isRangeScan ? 8 : activeProfile.concurrency;
     setState(() {
       _scanning = true;
       _cancelled = false;
@@ -496,7 +516,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     runScanningEngine(
       ips,
       mode: _mode == 2 ? ScanMode.deep : ScanMode.normal,
-      concurrency: activeProfile.concurrency,  // BUG 6 FIX: pass profile concurrency
+      concurrency: effectiveConcurrency,  // BUG 6 FIX + Range uses fixed 8
       deepSnis: deepSnis,
       normalSniOverride: normalSniOverride,
       isCfScan: isCfScan,
