@@ -394,6 +394,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           return;
         }
 
+        // Guard: user may have pressed STOP during the sampling awaits above.
+        // If so, _cancelled=true — don't start the scan engine.
+        if (_cancelled) {
+          setState(() {
+            _scanning = false;
+            _statusText = 'Cancelled.';
+          });
+          return;
+        }
+
         final bool isCf = _rangeCdnProfile == 'cloudflare';
         _runScan(
           sampledIps,
@@ -565,7 +575,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       if (isRangeScan) {
         RangeScanStorage().addScannedIps(ips).then((_) {
-          final alive = results.where((r) => r.isAlive).toList();
+          final alive = results.where((r) => r.isAlive).toList()
+            ..sort((a, b) => a.latencyMs.compareTo(b.latencyMs)); // best first
           final avgLatency = alive.isEmpty
               ? 0.0
               : alive.fold(0.0, (a, b) => a + b.latencyMs) / alive.length;
