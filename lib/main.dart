@@ -21,6 +21,9 @@ import 'utils/logger.dart';
 import 'engine/subnet_cache.dart';
 import 'models/cdn_provider.dart';
 import 'engine/range_engine.dart';
+import 'storage/range_scan_storage.dart';
+import 'engine/range_ip_sampler.dart';
+import 'ui/range/range_history_page.dart';
 
 // ─── Notifications ──────────────────────────────────────────────────────────
 
@@ -175,11 +178,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Set<String> _selectedSnis = {'www.google.com'};
   final _customSniController = TextEditingController();
 
-  // Range Scan state
-  CdnProvider?    _selectedCdn;
-  List<RangeOption> _cdnRanges  = [];
-  RangeOption?    _selectedRange;
-  bool            _loadingRanges = false;
+  // Range v2 state
+  String _rangeCdnProfile = 'cloudflare'; // 'cloudflare' or 'akamai'
+  List<String> _rangeCidrs = [];
+  String? _selectedRangeCidr;
+  bool _loadingRangeCidrs = false;
+  final _randomCountController = TextEditingController(text: '5000');
+  int _scannedIpMemoryCount = 0;
 
   // Batched UI updates
   Timer? _batchTimer;
@@ -202,6 +207,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _showWelcomePopupIfNeeded();
     _detectIsp();
     _ispTimer = Timer.periodic(const Duration(seconds: 30), (_) => _detectIsp());
+    RangeScanStorage().scannedIpCount().then((count) {
+      if (mounted) setState(() => _scannedIpMemoryCount = count);
+    });
+    _loadRangeCidrs();
   }
 
   @override
@@ -212,6 +221,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _batchTimer = null;
     _customSniController.dispose();
     _ipController.dispose();
+    _randomCountController.dispose();
     super.dispose();
   }
 
@@ -339,21 +349,45 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _startScan() {
+  Future<void> _startScan() async {
     // ── Range mode ──────────────────────────────────────────────────────────
     if (_mode == 3) {
-      if (_selectedRange == null) {
-        _showSnack('Please select a CDN range first.');
+      if (_selectedRangeCidr == null) {
+        _showSnack('Please select a CIDR range first.');
         return;
       }
-      final ips = expandCidr(_selectedRange!.cidr);
-      // Empty result means the safety guard fired (range too large — shouldn't
-      // happen after selectTopRanges filtering, but defensive check)
-      if (ips.isEmpty) {
-        _showSnack('Range too large to expand safely. Select a smaller one.');
+      final requestedCount =
+          int.tryParse(_randomCountController.text.trim()) ?? 5000;
+      if (requestedCount < 1 || requestedCount > 500000) {
+        _showSnack('Enter a number between 1 and 500,000.');
         return;
       }
-      _runScan(ips, null);   // Always Normal mode for Range scan
+
+      setState(() => _statusText = 'Building random IP sample...');
+
+      final alreadyScanned = await RangeScanStorage().loadScannedIps();
+
+      final sampledIps = await RangeIpSampler.sample(
+        allCidrs: [_selectedRangeCidr!],
+        requestedCount: requestedCount,
+        alreadyScanned: alreadyScanned,
+      );
+
+      if (sampledIps.isEmpty) {
+        setState(() => _statusText = 'All IPs in this range already scanned.');
+        _showSnack('No new IPs to scan. Go to History → Reset to start fresh.');
+        return;
+      }
+
+      final bool isCf = _rangeCdnProfile == 'cloudflare';
+      _runScan(
+        sampledIps,
+        null,
+        isRangeScan: true,
+        rangeCfMode: isCf,
+        rangeCidr: _selectedRangeCidr,
+        rangeRequestedCount: requestedCount,
+      );
       return;
     }
 
@@ -405,7 +439,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _runScan(List<String> ips, List<String>? deepSnis) {
+  void _runScan(List<String> ips, List<String>? deepSnis, {
+    bool isRangeScan = false,
+    bool rangeCfMode = false,
+    String? rangeCidr,
+    int? rangeRequestedCount,
+  }) {
     _batchTimer?.cancel();
     _pendingResults.clear();
     _lastNotifPct = -1;
@@ -435,11 +474,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     _startBatchTimer();
 
-    // CDN profile SNI override — only applies in Normal mode
+    // CDN profile SNI override
     String? normalSniOverride;
-    final bool isCfScan = (_mode == 1 && _normalCdnProfile == 'cloudflare') || _mode == 2;
-    if (_mode == 1 && _normalCdnProfile == 'cloudflare') {
-      normalSniOverride = 'speed.cloudflare.com';
+    bool isCfScan;
+    if (isRangeScan) {
+      isCfScan = rangeCfMode;
+      normalSniOverride = rangeCfMode ? 'speed.cloudflare.com' : null;
+    } else {
+      isCfScan = (_mode == 1 && _normalCdnProfile == 'cloudflare') || _mode == 2;
+      if (_mode == 1 && _normalCdnProfile == 'cloudflare') {
+        normalSniOverride = 'speed.cloudflare.com';
+      }
     }
     // 'cdn_akamai' leaves normalSniOverride null → engine uses default kShiroSni
     // isCfScan=true when: normal+cloudflare profile OR deep mode (CF SNIs in preset)
@@ -492,6 +537,42 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _showSnack('✓ Done! ${results.where((r) => r.isAlive).length} results found');
         Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) setState(() => _tab = 1);
+        });
+      }
+      if (isRangeScan) {
+        RangeScanStorage().addScannedIps(ips).then((_) {
+          final alive = results.where((r) => r.isAlive).toList();
+          final avgLatency = alive.isEmpty
+              ? 0.0
+              : alive.fold(0.0, (a, b) => a + b.latencyMs) / alive.length;
+          final topIps = alive.take(10).map((r) => <String, dynamic>{
+            'ip': r.ip,
+            'grade': r.grade,
+            'latencyMs': r.latencyMs,
+            'tier': r.tier.name,
+            if (r.colo != null) 'colo': r.colo,
+            if (r.sniUsed != null) 'sniUsed': r.sniUsed,
+          }).toList();
+
+          RangeScanStorage().saveSession({
+            'time': DateTime.now().toIso8601String(),
+            'provider': rangeCfMode ? 'cloudflare' : 'akamai',
+            'cidr': rangeCidr ?? '',
+            'randomCount': rangeRequestedCount ?? ips.length,
+            'totalScanned': results.length,
+            'aliveCount': alive.length,
+            'deadCount': results.where((r) => !r.isAlive).length,
+            'excellentCount': results.where((r) => r.tier == IpTier.excellent).length,
+            'goodCount': results.where((r) => r.tier == IpTier.good).length,
+            'usableCount': results.where((r) => r.tier == IpTier.usable).length,
+            'weakCount': results.where((r) => r.tier == IpTier.weak).length,
+            'avgLatencyMs': double.parse(avgLatency.toStringAsFixed(1)),
+            'topIps': topIps,
+          }).then((_) {
+            RangeScanStorage().scannedIpCount().then((count) {
+              if (mounted) setState(() => _scannedIpMemoryCount = count);
+            });
+          });
         });
       }
     }).catchError((e) {
@@ -1115,10 +1196,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _mode = mode;
         if (mode != 3) {
           // Clear range state when leaving Range mode
-          _selectedCdn   = null;
-          _cdnRanges     = [];
-          _selectedRange = null;
-          _loadingRanges = false;
+          _rangeCidrs = [];
+          _selectedRangeCidr = null;
+          _loadingRangeCidrs = false;
         }
       }),
       child: AnimatedContainer(
@@ -1187,125 +1267,264 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('CDN PROVIDER',
-              style: GoogleFonts.inter(
-                  color: textSecond, fontWeight: FontWeight.w700,
-                  fontSize: 11, letterSpacing: 1.2)),
-          const SizedBox(height: 12),
-
-          // ── CDN provider grid ─────────────────────────────────────────────
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: 8,
-            mainAxisSpacing: 8,
-            childAspectRatio: 3.2,
-            children: kCdnProviders.map((meta) {
-              final selected = _selectedCdn == meta.provider;
-              return GestureDetector(
-                onTap: _loadingRanges ? null : () => _selectCdn(meta),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
+          // ── Header row with History button ──────────────────────────────
+          Row(
+            children: [
+              Text('CDN PROFILE',
+                  style: GoogleFonts.inter(
+                      color: textSecond,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                      letterSpacing: 1.2)),
+              const Spacer(),
+              GestureDetector(
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const RangeHistoryPage()),
+                ).then((_) {
+                  RangeScanStorage().scannedIpCount().then((c) {
+                    if (mounted) setState(() => _scannedIpMemoryCount = c);
+                  });
+                }),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: selected ? accentLime.withOpacity(0.12) : iconBg,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: selected ? accentLime : borderColor,
-                      width: selected ? 1.5 : 1,
-                    ),
+                    color: iconBg,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: borderColor),
                   ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    '${meta.emoji}  ${meta.label}',
-                    style: GoogleFonts.inter(
-                      color: selected ? accentLime : textPrimary,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12,
-                    ),
-                  ),
+                  child: Row(children: [
+                    const Icon(Icons.history_rounded,
+                        color: accentLime, size: 14),
+                    const SizedBox(width: 4),
+                    Text('History',
+                        style: GoogleFonts.inter(
+                            color: accentLime,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600)),
+                  ]),
                 ),
-              );
-            }).toList(),
+              ),
+            ],
           ),
+          const SizedBox(height: 10),
 
-          // ── Range list ────────────────────────────────────────────────────
-          if (_loadingRanges) ...[
-            const SizedBox(height: 16),
-            const Center(child: SizedBox(
-              width: 20, height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2, color: accentLime),
-            )),
-          ] else if (_cdnRanges.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            Text('SELECT RANGE',
-                style: GoogleFonts.inter(
-                    color: textSecond, fontWeight: FontWeight.w700,
-                    fontSize: 11, letterSpacing: 1.2)),
-            const SizedBox(height: 8),
-            ..._cdnRanges.map((range) {
-              final sel = _selectedRange?.cidr == range.cidr;
-              return GestureDetector(
-                onTap: () => setState(() => _selectedRange = range),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  margin: const EdgeInsets.only(bottom: 6),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: sel ? accentLime.withOpacity(0.10) : card2Color,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: sel ? accentLime : borderColor,
-                      width: sel ? 1.5 : 1,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(sel ? Icons.radio_button_checked_rounded
-                                : Icons.radio_button_off_rounded,
-                          size: 16,
-                          color: sel ? accentLime : textSecond),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(range.label,
-                            style: GoogleFonts.robotoMono(
-                              color: sel ? accentLime : textPrimary,
-                              fontSize: 12,
-                              fontWeight: sel ? FontWeight.w600 : FontWeight.w400,
-                            )),
-                      ),
-                    ],
-                  ),
+          // ── CDN Profile buttons ─────────────────────────────────────────
+          Row(
+            children: [
+              _buildRangeProfileBtn('cloudflare', '☁️ Cloudflare'),
+              const SizedBox(width: 8),
+              _buildRangeProfileBtn('akamai', '🌐 Akamai'),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // ── SELECT RANGE ────────────────────────────────────────────────
+          Text('SELECT RANGE',
+              style: GoogleFonts.inter(
+                  color: textSecond,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 11,
+                  letterSpacing: 1.2)),
+          const SizedBox(height: 8),
+
+          if (_loadingRangeCidrs)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(12),
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: accentLime),
                 ),
-              );
-            }),
-          ],
+              ),
+            )
+          else if (_rangeCidrs.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text('Tap a profile above to load ranges.',
+                  style: GoogleFonts.inter(color: textSecond, fontSize: 12)),
+            )
+          else
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 260),
+              child: ListView.builder(
+                shrinkWrap: true,
+                physics: const ClampingScrollPhysics(),
+                itemCount: _rangeCidrs.length,
+                itemBuilder: (ctx, i) {
+                  final cidr = _rangeCidrs[i];
+                  final sel = _selectedRangeCidr == cidr;
+                  final count = cidrIpCount(cidr);
+                  final countStr = count >= 1000000
+                      ? '${(count / 1000000).toStringAsFixed(1)}M IPs'
+                      : count >= 1000
+                          ? '${(count / 1000).toStringAsFixed(0)}K IPs'
+                          : '$count IPs';
+                  return GestureDetector(
+                    onTap: () => setState(() => _selectedRangeCidr = cidr),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      margin: const EdgeInsets.only(bottom: 5),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 9),
+                      decoration: BoxDecoration(
+                        color: sel
+                            ? accentLime.withOpacity(0.08)
+                            : card2Color,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: sel ? accentLime : borderColor,
+                            width: sel ? 1.5 : 1),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            sel
+                                ? Icons.radio_button_checked_rounded
+                                : Icons.radio_button_off_rounded,
+                            size: 15,
+                            color: sel ? accentLime : textSecond,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(cidr,
+                                style: GoogleFonts.robotoMono(
+                                    color: sel ? accentLime : textPrimary,
+                                    fontSize: 12,
+                                    fontWeight: sel
+                                        ? FontWeight.w600
+                                        : FontWeight.w400)),
+                          ),
+                          Text('($countStr)',
+                              style: GoogleFonts.inter(
+                                  color: textSecond, fontSize: 11)),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+
+          const SizedBox(height: 16),
+
+          // ── Random sample count input ───────────────────────────────────
+          Text('RANDOM SAMPLE',
+              style: GoogleFonts.inter(
+                  color: textSecond,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 11,
+                  letterSpacing: 1.2)),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _randomCountController,
+            keyboardType: TextInputType.number,
+            style: GoogleFonts.inter(color: textPrimary, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: 'Number of IPs to scan randomly...',
+              hintStyle:
+                  GoogleFonts.inter(color: textSecond, fontSize: 12),
+              filled: true,
+              fillColor: card2Color,
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide:
+                      const BorderSide(color: accentLime, width: 1.5)),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide:
+                      const BorderSide(color: borderColor, width: 1)),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Icon(Icons.memory_rounded,
+                  size: 13, color: textSecond),
+              const SizedBox(width: 5),
+              Text(
+                'Scanned memory: ${_formatMemoryCount(_scannedIpMemoryCount)} IPs — will be skipped',
+                style: GoogleFonts.inter(color: textSecond, fontSize: 11),
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  void _selectCdn(CdnProviderMeta meta) {
-    setState(() {
-      _selectedCdn   = meta.provider;
-      _cdnRanges     = [];
-      _selectedRange = null;
-      _loadingRanges = true;
-    });
+  Widget _buildRangeProfileBtn(String value, String label) {
+    final active = _rangeCdnProfile == value;
+    return Expanded(
+      child: GestureDetector(
+        onTap: _loadingRangeCidrs
+            ? null
+            : () {
+                setState(() {
+                  _rangeCdnProfile = value;
+                  _rangeCidrs = [];
+                  _selectedRangeCidr = null;
+                });
+                _loadRangeCidrs();
+              },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: active ? accentLime.withOpacity(0.12) : iconBg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+                color: active ? accentLime : borderColor,
+                width: active ? 1.5 : 1),
+          ),
+          child: Text(label,
+              style: GoogleFonts.inter(
+                  color: active ? accentLime : textPrimary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13),
+              textAlign: TextAlign.center),
+        ),
+      ),
+    );
+  }
 
-    fetchCdnRanges(meta).then((ranges) {
+  String _formatMemoryCount(int n) {
+    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
+    if (n >= 1000) return '${(n / 1000).toStringAsFixed(0)}K';
+    return '$n';
+  }
+
+  void _loadRangeCidrs() {
+    final meta = kCdnProviders.firstWhere(
+      (m) => (_rangeCdnProfile == 'cloudflare'
+          ? m.provider == CdnProvider.cloudflare
+          : m.provider == CdnProvider.akamai),
+    );
+    setState(() => _loadingRangeCidrs = true);
+    fetchAllCidrsForProvider(meta).then((cidrs) {
       if (!mounted) return;
       setState(() {
-        _cdnRanges     = ranges;
-        _loadingRanges = false;
+        _rangeCidrs = cidrs;
+        _selectedRangeCidr = cidrs.isNotEmpty ? cidrs.first : null;
+        _loadingRangeCidrs = false;
       });
     }).catchError((_) {
       if (!mounted) return;
       setState(() {
-        _loadingRanges = false;
-        _cdnRanges     = [];
+        _rangeCidrs = meta.fallback;
+        _selectedRangeCidr =
+            meta.fallback.isNotEmpty ? meta.fallback.first : null;
+        _loadingRangeCidrs = false;
       });
-      _showSnack('Could not load ranges. Check your connection.');
     });
   }
 
@@ -1318,7 +1537,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             child: ElevatedButton(
               onPressed: _scanning
                   ? _stopScan
-                  : (_mode == 3 && _selectedRange == null ? null : _startScan),
+                  : (_mode == 3 && _selectedRangeCidr == null ? null : _startScan),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _scanning ? const Color(0xFF3A1A1A) : accentLime,
                 foregroundColor: _scanning ? const Color(0xFFFF5252) : bgColor,

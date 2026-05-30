@@ -138,6 +138,59 @@ Future<List<RangeOption>> fetchCdnRanges(CdnProviderMeta meta) async {
   return selectTopRanges(cidrs);
 }
 
+// ── Fetch ALL CIDRs (no selectTopRanges cap) ─────────────────────────────────
+
+/// Fetches ALL CIDRs for a provider without the 7-item selectTopRanges cap.
+/// Returns ALL IPv4 CIDRs, sorted: larger prefix first (/24 before /13).
+/// Falls back to meta.fallback on network failure.
+Future<List<String>> fetchAllCidrsForProvider(CdnProviderMeta meta) async {
+  List<String> cidrs = [];
+
+  if (meta.fetchUrl.isNotEmpty) {
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+      final request = await client.getUrl(Uri.parse(meta.fetchUrl));
+      final response = await request.close().timeout(const Duration(seconds: 8));
+      final body = await response.transform(utf8.decoder).join();
+      client.close();
+
+      if (meta.provider == CdnProvider.cloudflare) {
+        cidrs = body
+            .split('\n')
+            .map((l) => l.trim())
+            .where((l) => l.isNotEmpty && l.contains('.'))
+            .toList();
+      } else if (meta.provider == CdnProvider.google) {
+        final json = jsonDecode(body) as Map<String, dynamic>;
+        cidrs = (json['prefixes'] as List)
+            .map((p) => (p as Map)['ipv4Prefix'] as String?)
+            .whereType<String>()
+            .toList();
+      } else if (meta.provider == CdnProvider.amazon) {
+        final json = jsonDecode(body) as Map<String, dynamic>;
+        cidrs = (json['prefixes'] as List)
+            .where((p) => (p as Map)['service'] == 'CLOUDFRONT')
+            .map((p) => (p as Map)['ip_prefix'] as String?)
+            .whereType<String>()
+            .toList();
+      }
+    } catch (_) {}
+  }
+
+  if (cidrs.isEmpty) cidrs = meta.fallback;
+
+  // Filter IPv4 only, sort larger prefix first (/24 comes before /13)
+  final ipv4 = cidrs
+      .where((c) => c.contains('.') && c.contains('/'))
+      .toList();
+  ipv4.sort((a, b) {
+    final pa = int.tryParse(a.split('/').last) ?? 0;
+    final pb = int.tryParse(b.split('/').last) ?? 0;
+    return pb.compareTo(pa); // /24 (larger number) first
+  });
+  return ipv4;
+}
+
 // ── CIDR expansion ───────────────────────────────────────────────────────────
 
 // Expands a CIDR to a list of usable IPv4 strings (excludes network + broadcast).
