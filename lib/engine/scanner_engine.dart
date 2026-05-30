@@ -247,9 +247,16 @@ Future<ScanResult> _scanWithSni(
 
   final tier = calcTier(survival.survivalMs, phase);
 
-  final isAlive = tier != IpTier.dead && tier != IpTier.weak
+  // Mirrors SenPai RequireWS: when CF probe ran (cfWsOk != null),
+  // WS success is required for isAlive.
+  // SenPai: if r.RequireWS && !r.WSOk { return false }
+  // cfWsOk=null  → CF probe didn't run → no WS requirement (non-CF scan)
+  // cfWsOk=true  → WS passed → no penalty
+  // cfWsOk=false → WS failed (DPI detected) → isAlive=false
+  final isAlive = (tier != IpTier.dead && tier != IpTier.weak
       ? true
-      : phase == ScanPhase.passed;
+      : phase == ScanPhase.passed)
+      && (cfWsOk == null || cfWsOk == true);
 
   double? speedKBs;
   if (tier == IpTier.excellent ||
