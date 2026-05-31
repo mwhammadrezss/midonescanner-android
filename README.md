@@ -4,6 +4,7 @@
 
 # MidONe Scanner
 ### اسکنر حرفه‌ای آی‌پی تمیز
+##### CDN &nbsp;·&nbsp; CLOUDFLARE &nbsp;·&nbsp; DNS
 [![Release](https://img.shields.io/github/v/release/mwhammadrezss/midonescanner-android?label=آخرین%20نسخه&style=flat-square&color=brightgreen)](https://github.com/mwhammadrezss/midonescanner-android/releases/latest)
 [![Platform](https://img.shields.io/badge/Platform-Android-green?style=flat-square&logo=android)](https://github.com/mwhammadrezss/midonescanner-android/releases/latest)
 [![Telegram](https://img.shields.io/badge/Telegram-@mmdrlx-blue?style=flat-square&logo=telegram)](https://t.me/mmdrlx)
