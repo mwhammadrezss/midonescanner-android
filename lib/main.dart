@@ -724,9 +724,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             margin: const EdgeInsets.only(bottom: 6),
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                             decoration: BoxDecoration(
-                              color: checked ? accentLime.withValues(alpha: 0.08) : iconBg,
+                              color: checked ? accentLime.withOpacity(0.08) : iconBg,
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: checked ? accentLime.withValues(alpha: 0.4) : borderColor),
+                              border: Border.all(color: checked ? accentLime.withOpacity(0.4) : borderColor),
                             ),
                             child: Row(
                               children: [
@@ -746,7 +746,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                     decoration: BoxDecoration(
-                                        color: accentLime.withValues(alpha: 0.15),
+                                        color: accentLime.withOpacity(0.15),
                                         borderRadius: BorderRadius.circular(6)),
                                     child: Text('ShirKhorshid',
                                         style: GoogleFonts.inter(color: accentLime, fontSize: 9, fontWeight: FontWeight.w700)),
@@ -1196,7 +1196,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           margin: const EdgeInsets.symmetric(horizontal: 2),
           padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
-            color: active ? accentLime.withValues(alpha: 0.12) : iconBg,
+            color: active ? accentLime.withOpacity(0.12) : iconBg,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: active ? accentLime : borderColor, width: active ? 1.5 : 1),
           ),
@@ -1263,7 +1263,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
         decoration: BoxDecoration(
-          color: active ? accentLime.withValues(alpha: 0.12) : iconBg,
+          color: active ? accentLime.withOpacity(0.12) : iconBg,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: active ? accentLime : borderColor, width: active ? 1.5 : 1),
         ),
@@ -1306,7 +1306,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: active ? accentLime.withValues(alpha: 0.12) : iconBg,
+          color: active ? accentLime.withOpacity(0.12) : iconBg,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: active ? accentLime : borderColor, width: active ? 1.5 : 1),
         ),
@@ -1526,10 +1526,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: r.isEdge ? const Color(0xFF00E5FF).withValues(alpha: 0.05) : card2Color,
+        color: r.isEdge ? const Color(0xFF00E5FF).withOpacity(0.05) : card2Color,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: r.isEdge ? const Color(0xFF00E5FF).withValues(alpha: 0.4) : borderColor,
+          color: r.isEdge ? const Color(0xFF00E5FF).withOpacity(0.4) : borderColor,
         ),
       ),
       child: Row(
@@ -1546,9 +1546,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF69FF47).withValues(alpha: 0.12),
+                          color: const Color(0xFF69FF47).withOpacity(0.12),
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: const Color(0xFF69FF47).withValues(alpha: 0.4)),
+                          border: Border.all(color: const Color(0xFF69FF47).withOpacity(0.4)),
                         ),
                         child: Text('CF Edge', style: GoogleFonts.inter(color: const Color(0xFF69FF47), fontSize: 10, fontWeight: FontWeight.w700)),
                       ),
@@ -1886,7 +1886,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           horizontal: 12, vertical: 9),
                       decoration: BoxDecoration(
                         color: sel
-                            ? accentLime.withValues(alpha: 0.08)
+                            ? accentLime.withOpacity(0.08)
                             : card2Color,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
@@ -1993,7 +1993,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           duration: const Duration(milliseconds: 180),
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: active ? accentLime.withValues(alpha: 0.12) : iconBg,
+            color: active ? accentLime.withOpacity(0.12) : iconBg,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
                 color: active ? accentLime : borderColor,
@@ -2221,7 +2221,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: accent.withValues(alpha: 0.25))),
+          border: Border.all(color: accent.withOpacity(0.25))),
       child: Column(
         children: [
           Text(value, style: GoogleFonts.inter(color: accent, fontWeight: FontWeight.w800, fontSize: 20)),
@@ -2409,9 +2409,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-            color: accentLime.withValues(alpha: 0.12),
+            color: accentLime.withOpacity(0.12),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: accentLime.withValues(alpha: 0.5))),
+            border: Border.all(color: accentLime.withOpacity(0.5))),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -2433,7 +2433,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: !r.isAlive ? const Color(0xFFFF5252).withValues(alpha: 0.25) : borderColor),
+        border: Border.all(color: !r.isAlive ? const Color(0xFFFF5252).withOpacity(0.25) : borderColor),
       ),
       child: Row(
         children: [
@@ -2442,7 +2442,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           Expanded(child: Text(r.ip, style: GoogleFonts.robotoMono(color: textPrimary, fontSize: 13, fontWeight: FontWeight.w600))),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(color: gColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(6), border: Border.all(color: gColor.withValues(alpha: 0.3))),
+            decoration: BoxDecoration(color: gColor.withOpacity(0.12), borderRadius: BorderRadius.circular(6), border: Border.all(color: gColor.withOpacity(0.3))),
             child: Text(r.grade, style: GoogleFonts.inter(color: gColor, fontSize: 10, fontWeight: FontWeight.w700)),
           ),
           const SizedBox(width: 8),
@@ -2479,7 +2479,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
             color: !r.isAlive
-                ? const Color(0xFFFF5252).withValues(alpha: 0.3)
+                ? const Color(0xFFFF5252).withOpacity(0.3)
                 : borderColor),
       ),
       child: Column(
@@ -2498,14 +2498,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 const SizedBox(width: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(color: const Color(0xFFFF5252).withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
+                  decoration: BoxDecoration(color: const Color(0xFFFF5252).withOpacity(0.15), borderRadius: BorderRadius.circular(6)),
                   child: Text('DEAD', style: GoogleFonts.inter(color: const Color(0xFFFF5252), fontSize: 10, fontWeight: FontWeight.w700)),
                 ),
               ] else if (r.loss > 30) ...[
                 const SizedBox(width: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(color: const Color(0xFFFFAB40).withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
+                  decoration: BoxDecoration(color: const Color(0xFFFFAB40).withOpacity(0.15), borderRadius: BorderRadius.circular(6)),
                   child: Text('Loss ${r.loss}%', style: GoogleFonts.inter(color: const Color(0xFFFFAB40), fontSize: 10, fontWeight: FontWeight.w700)),
                 ),
               ],
@@ -2514,7 +2514,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 const SizedBox(width: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(color: const Color(0xFFFF3030).withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
+                  decoration: BoxDecoration(color: const Color(0xFFFF3030).withOpacity(0.15), borderRadius: BorderRadius.circular(6)),
                   child: Text('DPI ${(r.dpiSuspicion * 100).round()}%', style: GoogleFonts.inter(color: const Color(0xFFFF3030), fontSize: 9, fontWeight: FontWeight.w700)),
                 ),
               ],
@@ -2526,9 +2526,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                    color: gColor.withValues(alpha: 0.12),
+                    color: gColor.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: gColor.withValues(alpha: 0.4))),
+                    border: Border.all(color: gColor.withOpacity(0.4))),
                 child: Text(r.grade, style: GoogleFonts.inter(color: gColor, fontWeight: FontWeight.w700, fontSize: 11)),
               ),
             ],
@@ -2662,7 +2662,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         decoration: BoxDecoration(
           color: Colors.black87,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: accentLime.withValues(alpha: 0.3)),
+          border: Border.all(color: accentLime.withOpacity(0.3)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2702,9 +2702,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-            color: isAccent ? accentLime.withValues(alpha: 0.12) : iconBg,
+            color: isAccent ? accentLime.withOpacity(0.12) : iconBg,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: isActive || isAccent ? color.withValues(alpha: 0.5) : borderColor)),
+            border: Border.all(color: isActive || isAccent ? color.withOpacity(0.5) : borderColor)),
         child: Text(label, style: GoogleFonts.inter(color: color, fontSize: 11, fontWeight: FontWeight.w600)),
       ),
     );
@@ -2714,9 +2714,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.08),
+          color: color.withOpacity(0.08),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: color.withValues(alpha: 0.2))),
+          border: Border.all(color: color.withOpacity(0.2))),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -2750,9 +2750,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: active ? accentLime.withValues(alpha: 0.12) : Colors.transparent,
+          color: active ? accentLime.withOpacity(0.12) : Colors.transparent,
           borderRadius: BorderRadius.circular(14),
-          border: active ? Border.all(color: accentLime.withValues(alpha: 0.3)) : null,
+          border: active ? Border.all(color: accentLime.withOpacity(0.3)) : null,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -2807,11 +2807,11 @@ class _DnsResultCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.04),
+        color: Colors.white.withOpacity(0.04),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: rank == 1
-              ? const Color(0xFF00E5FF).withValues(alpha: 0.6)
+              ? const Color(0xFF00E5FF).withOpacity(0.6)
               : Colors.white12,
         ),
       ),
@@ -2892,9 +2892,9 @@ class _DnsChip extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
         decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.15),
+          color: color.withOpacity(0.15),
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: color.withValues(alpha: 0.5)),
+          border: Border.all(color: color.withOpacity(0.5)),
         ),
         child: Text(label,
             style: TextStyle(fontSize: 9, color: color, fontWeight: FontWeight.bold)),
