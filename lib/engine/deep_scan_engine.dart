@@ -432,6 +432,20 @@ Future<List<ScanResult>> runDeepScanEngine(
   onPrefilterDone?.call(liveIps.length, ips.length);
   if (liveIps.isEmpty || cancelCheck()) return results;
 
+  // progress: total = liveIps count so UI shows 0→100% over all live IPs
+  final _progressTotal = liveIps.length;
+
+  // progress: start event (0%) — signals deep scan has begun
+  {
+    final _startResult = ScanResult(
+      ip: liveIps.first, latencyMs: 0, jitterMs: 0, isAlive: false,
+      grade: '-', country: '', flag: '', loss: 0, reliability: 0,
+      score: null, survivalMs: null, retransmits: 0,
+      phase: ScanPhase.tlsFail, tier: IpTier.dead, dpiSuspicion: 0,
+    );
+    onProgress?.call(0, _progressTotal, _startResult);
+  }
+
   // ── STAGE 1: CDN Family probe ─────────────────────────────────────────────
   // 6 concurrent IPs. Per IP: max 25s total, max 8s per family.
   // All 6 families always tested (no inter-family early exit).
@@ -495,6 +509,11 @@ Future<List<ScanResult>> runDeepScanEngine(
   // ── STAGES 3–7: Elite verification ───────────────────────────────────────
   const int _eliteConcurrency = 4;
   final eliteSem = Semaphore(_eliteConcurrency);
+  // progress: track how many of the liveIps total we have "processed"
+  // Stage 1 already tested all liveIps; elite stage processes winners subset.
+  // We map eliteDone onto the full liveIps range so the bar reaches 100%.
+  // Formula: done = stage1Count + eliteDone * (remaining / winners.count)
+  final _stage1Count = liveIps.length - winners.length; // IPs filtered out
   int eliteDone  = 0;
 
   await Future.wait(winners.map((w) async {
@@ -614,11 +633,18 @@ Future<List<ScanResult>> runDeepScanEngine(
       ScanHistoryService().recordRecentResult(scanResult.isAlive);
 
       eliteDone++;
-      onProgress?.call(eliteDone, winners.length, scanResult);
+      // Map onto full liveIps range: stage1Count already done + elite progress
+      final _eliteProgressDone = _stage1Count + eliteDone;
+      onProgress?.call(_eliteProgressDone, _progressTotal, scanResult);
     } finally {
       eliteSem.release();
     }
   }));
+
+  // progress: done event (100%) — all processing complete
+  if (_progressTotal > 0 && results.isNotEmpty) {
+    onProgress?.call(_progressTotal, _progressTotal, results.last);
+  }
 
   // ── Sort best to worst ────────────────────────────────────────────────────
   results.sort((a, b) {
