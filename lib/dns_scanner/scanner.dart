@@ -15,6 +15,8 @@
 //
 // ================================================================
 
+import 'dart:async';
+
 import 'models.dart';
 import 'source_of_truth.dart';
 import 'stages/stage1_latency.dart';
@@ -37,7 +39,7 @@ class DNSScanner {
   // ── Main entry point ─────────────────────────────────────────
 
   /// Scan a list of DNS server IPs.
-  /// Yields [ScanProgress] updates throughout.
+  /// Yields [ScanProgress] updates throughout in real time.
   /// After the final yield, read [results] for the ranked list.
   Stream<ScanProgress> scan(List<String> serverIps) async* {
     final sot = SourceOfTruth(
@@ -61,11 +63,7 @@ class DNSScanner {
         .map((e) => e.key)
         .toList();
 
-    // FIX #7: availableProviders was computed but never used — sot kept
-    // querying ALL providers including unreachable ones. Now we rebuild sot
-    // with only the reachable providers so freedom scoring uses valid data.
-    // If none are reachable we keep the original sot (it will return null for
-    // all domains and Stage 4 will handle that gracefully with neutral scores).
+    // FIX #7: rebuild sot with only reachable providers
     final effectiveSot = availableProviders.isNotEmpty
         ? SourceOfTruth(
             providers: availableProviders,
@@ -79,8 +77,7 @@ class DNSScanner {
         tested: 0,
         total: serverIps.length,
         survivors: serverIps.length,
-        message:
-            '⚠️ No DoH providers reachable. Freedom scoring will be limited.',
+        message: '⚠️ No DoH providers reachable. Freedom scoring will be limited.',
         percentage: 0.01,
       );
     }
@@ -100,19 +97,29 @@ class DNSScanner {
     );
 
     // ── Stage 1: Latency ──────────────────────────────────────
-    // FIX #12: Stage 1 is the longest stage. Previously onProgress was a
-    // no-op so the UI showed nothing between 0% and 20%, making it look
-    // frozen. We now collect intermediate events and yield them so the UI
-    // can display per-server progress in real time.
-    final stage1Events = <ScanProgress>[];
-    servers = await Stage1Latency.run(
-      servers,
-      config,
-      onProgress: stage1Events.add,
-    );
-    for (final p in stage1Events) {
-      yield p;
+    // FIX (real-time): Use a StreamController to forward each onProgress
+    // event immediately as it arrives — no buffering, no waiting for stage end.
+    {
+      final ctrl = StreamController<ScanProgress>();
+      final scanFuture = Stage1Latency.run(
+        servers,
+        config,
+        onProgress: ctrl.add,
+      ).then((result) {
+        ctrl.close();
+        return result;
+      }).catchError((Object e) {
+        ctrl.addError(e);
+        ctrl.close();
+        return <DNSServer>[];
+      });
+
+      await for (final p in ctrl.stream) {
+        yield p;
+      }
+      servers = await scanFuture;
     }
+
     yield ScanProgress(
       stage: ScanStage.stage1Latency,
       tested: serverIps.length,
@@ -124,10 +131,6 @@ class DNSScanner {
       percentage: 0.20,
     );
 
-    // FIX #1 (complete): Stage 1 returned an empty list — all input servers
-    // were unresponsive (no network, wrong IPs, full outage). Stop here and
-    // surface a clear error instead of letting subsequent stages receive []
-    // and crash inside concurrentMap (clamp(1, 0) → ArgumentError).
     if (servers.isEmpty) {
       yield ScanProgress(
         stage: ScanStage.complete,
@@ -142,11 +145,28 @@ class DNSScanner {
     }
 
     // ── Stage 2A: NXDOMAIN ────────────────────────────────────
-    servers = await Stage2aNxdomain.run(
-      servers,
-      config,
-      onProgress: (_) {},
-    );
+    // FIX: real-time progress forwarding via StreamController
+    {
+      final ctrl = StreamController<ScanProgress>();
+      final scanFuture = Stage2aNxdomain.run(
+        servers,
+        config,
+        onProgress: ctrl.add,
+      ).then((result) {
+        ctrl.close();
+        return result;
+      }).catchError((Object e) {
+        ctrl.addError(e);
+        ctrl.close();
+        return <DNSServer>[];
+      });
+
+      await for (final p in ctrl.stream) {
+        yield p;
+      }
+      servers = await scanFuture;
+    }
+
     yield ScanProgress(
       stage: ScanStage.stage2aNxdomain,
       tested: servers.length,
@@ -170,12 +190,29 @@ class DNSScanner {
     }
 
     // ── Stage 2B: Hijack ──────────────────────────────────────
-    servers = await Stage2bHijack.run(
-      servers,
-      config,
-      effectiveSot,
-      onProgress: (_) {},
-    );
+    // FIX: real-time progress forwarding via StreamController
+    {
+      final ctrl = StreamController<ScanProgress>();
+      final scanFuture = Stage2bHijack.run(
+        servers,
+        config,
+        effectiveSot,
+        onProgress: ctrl.add,
+      ).then((result) {
+        ctrl.close();
+        return result;
+      }).catchError((Object e) {
+        ctrl.addError(e);
+        ctrl.close();
+        return <DNSServer>[];
+      });
+
+      await for (final p in ctrl.stream) {
+        yield p;
+      }
+      servers = await scanFuture;
+    }
+
     yield ScanProgress(
       stage: ScanStage.stage2bHijack,
       tested: servers.length,
@@ -198,11 +235,28 @@ class DNSScanner {
     }
 
     // ── Stage 3: Burst + Jitter + Packet Loss ─────────────────
-    servers = await Stage3BurstJitter.run(
-      servers,
-      config,
-      onProgress: (_) {},
-    );
+    // FIX: real-time progress forwarding via StreamController
+    {
+      final ctrl = StreamController<ScanProgress>();
+      final scanFuture = Stage3BurstJitter.run(
+        servers,
+        config,
+        onProgress: ctrl.add,
+      ).then((result) {
+        ctrl.close();
+        return result;
+      }).catchError((Object e) {
+        ctrl.addError(e);
+        ctrl.close();
+        return <DNSServer>[];
+      });
+
+      await for (final p in ctrl.stream) {
+        yield p;
+      }
+      servers = await scanFuture;
+    }
+
     yield ScanProgress(
       stage: ScanStage.stage3BurstJitter,
       tested: servers.length,
@@ -212,16 +266,32 @@ class DNSScanner {
       percentage: 0.55,
     );
 
-    // Stage 3 sorts but never eliminates — it returns a non-empty list as
-    // long as the input was non-empty, so no empty-list check needed here.
+    // Stage 3 sorts but never eliminates — no empty-list check needed.
 
     // ── Stage 4: Freedom Score ────────────────────────────────
-    servers = await Stage4Freedom.run(
-      servers,
-      config,
-      effectiveSot,
-      onProgress: (_) {},
-    );
+    // FIX: real-time progress forwarding via StreamController
+    {
+      final ctrl = StreamController<ScanProgress>();
+      final scanFuture = Stage4Freedom.run(
+        servers,
+        config,
+        effectiveSot,
+        onProgress: ctrl.add,
+      ).then((result) {
+        ctrl.close();
+        return result;
+      }).catchError((Object e) {
+        ctrl.addError(e);
+        ctrl.close();
+        return <DNSServer>[];
+      });
+
+      await for (final p in ctrl.stream) {
+        yield p;
+      }
+      servers = await scanFuture;
+    }
+
     yield ScanProgress(
       stage: ScanStage.stage4Freedom,
       tested: servers.length,
@@ -231,15 +301,30 @@ class DNSScanner {
       percentage: 0.80,
     );
 
-    // Stage 4 now guarantees at least 1 server via its fallback logic —
-    // no empty-list check needed here.
+    // Stage 4 guarantees at least 1 server via fallback logic.
 
     // ── Stage 5: DoH + Final Ranking ─────────────────────────
-    servers = await Stage5DoHFinal.run(
-      servers,
-      config,
-      onProgress: (_) {},
-    );
+    // FIX: real-time progress forwarding via StreamController
+    {
+      final ctrl = StreamController<ScanProgress>();
+      final scanFuture = Stage5DoHFinal.run(
+        servers,
+        config,
+        onProgress: ctrl.add,
+      ).then((result) {
+        ctrl.close();
+        return result;
+      }).catchError((Object e) {
+        ctrl.addError(e);
+        ctrl.close();
+        return <DNSServer>[];
+      });
+
+      await for (final p in ctrl.stream) {
+        yield p;
+      }
+      servers = await scanFuture;
+    }
 
     _results = servers;
 
@@ -254,9 +339,6 @@ class DNSScanner {
   }
 
   // ── Helpers ──────────────────────────────────────────────────
-
-
-
 
   String _buildSummary(List<DNSServer> top) {
     final sb = StringBuffer('🏆 Scan complete! Top ${top.length} DNS:\n');
