@@ -1,6 +1,6 @@
 // lib/engine/adaptive_concurrency.dart
 // p30: adaptiveConcurrencyController — dynamically adjusts concurrency based on network errors
-// UPGRADED: min 4→50, max 24→50, initial 8→12 for Windows-level performance
+// UPGRADED: min 2→4, max 24→50, initial 8→12 for Windows-level performance
 
 class AdaptiveConcurrencyController {
   static final AdaptiveConcurrencyController _i =

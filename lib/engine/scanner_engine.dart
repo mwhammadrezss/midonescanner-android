@@ -412,7 +412,9 @@ Future<List<ScanResult>> runScanningEngine(
   }
 
   // UPGRADED: clean Semaphore pattern (replaces manual _activeScans/_scanCompleters)
-  final scanSem = Semaphore(adaptiveCtrl.current);
+  // Semaphore tracks adaptive concurrency — expands when controller scales up
+  int _prevConcurrency = adaptiveCtrl.current;
+  final scanSem = Semaphore(_prevConcurrency);
 
   await Future.wait(liveIps.map((ip) async {
     if (cancelCheck()) return;
@@ -429,8 +431,17 @@ Future<List<ScanResult>> runScanningEngine(
       results.add(r);
       done++;
       onProgress?.call(done, totalLive, r);
-      if (r.isAlive) adaptiveCtrl.recordSuccess();
-      else           adaptiveCtrl.recordError();
+      if (r.isAlive) {
+        adaptiveCtrl.recordSuccess();
+      } else {
+        adaptiveCtrl.recordError();
+      }
+      // Expand semaphore if adaptive controller scaled up
+      final newConcurrency = adaptiveCtrl.current;
+      if (newConcurrency > _prevConcurrency) {
+        scanSem.expand(newConcurrency - _prevConcurrency);
+        _prevConcurrency = newConcurrency;
+      }
     } finally {
       scanSem.release();
     }

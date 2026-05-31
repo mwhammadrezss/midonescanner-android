@@ -31,4 +31,16 @@ class Semaphore {
       _count++;
     }
   }
+
+  /// Dynamically increase the semaphore capacity (e.g. when adaptive controller scales up).
+  /// Wakes waiting tasks up to [extra] slots.
+  void expand(int extra) {
+    for (int i = 0; i < extra; i++) {
+      if (_waiters.isNotEmpty) {
+        _waiters.removeAt(0).complete();
+      } else {
+        _count++;
+      }
+    }
+  }
 }
