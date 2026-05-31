@@ -741,7 +741,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     runIsolateScanEngine(
       ips,
       mode: _cdnSubMode == CdnSubMode.deep ? ScanMode.deep : ScanMode.normal,
-      concurrency: effectiveConcurrency,  // BUG 6 FIX + Range uses fixed 8
+      // concurrency auto-detected by runIsolateScanEngine (platform-aware)
       deepSnis: deepSnis,
       normalSniOverride: normalSniOverride,
       isCfScan: isCfScan,
