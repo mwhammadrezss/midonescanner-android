@@ -2765,7 +2765,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ],
             ],
           ),
-          // DNS action buttons: Copy Top 5 + Update Online + Apply DNS
+          // DNS action buttons: Copy Top 5 + Update Online
           const SizedBox(height: 8),
           Row(
             children: [
@@ -2781,25 +2781,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ],
           ),
-          // Apply DNS (Windows only)
-          if (Platform.isWindows && _dnsResults != null && _dnsResults!.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            _buildApplyDnsSection(),
-          ],
-          // DNS Status Monitor panel
-          if (_appliedDnsIp != null) _buildDnsStatusPanel(),
-          if (_applyDnsMessage != null && _appliedDnsIp == null)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(_applyDnsMessage!,
-                  style: const TextStyle(color: Color(0xFF69FF47), fontSize: 12)),
-            ),
-          if (_applyDnsError != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(_applyDnsError!,
-                  style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
-            ),
           if (_dnsUpdateMessage != null)
             Padding(
               padding: const EdgeInsets.only(top: 4),
@@ -2895,6 +2876,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             else
               ..._dnsResults!.asMap().entries.map((e) =>
                   _DnsResultCard(server: e.value)),
+            // ── Apply DNS — appears RIGHT AFTER results list ──────────────
+            if (Platform.isWindows && _dnsResults!.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _buildApplyDnsSection(),
+            ],
+            // DNS Status Monitor panel (shows after Apply pressed)
+            if (_appliedDnsIp != null) ...[
+              _buildDnsStatusPanel(),
+            ],
+            if (_applyDnsMessage != null && _appliedDnsIp == null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(_applyDnsMessage!,
+                    style: const TextStyle(color: Color(0xFF69FF47), fontSize: 12)),
+              ),
+            if (_applyDnsError != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(_applyDnsError!,
+                    style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+              ),
           ] else if (!_dnsScanning) ...[
             const SizedBox(height: 16),
             Center(
