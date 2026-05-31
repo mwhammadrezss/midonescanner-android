@@ -174,7 +174,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _ipController = TextEditingController();
   List<ScanResult> _results = [];
   String _statusText = 'Ready to scan...';
-  String _sortBy = 'latency';
+  String _sortBy = 'speed';  // default: sort by score
   // BUG 9 FIX: removed _filterThrottled — dead code, no UI toggle existed.
   // The 'alive' advanced filter covers this use case.
 
@@ -935,8 +935,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _copyTop5() {
-    final top5 = _displayResults.where((r) => r.isAlive).take(5).toList();
-    if (top5.isEmpty) { _showSnack('No alive results!'); return; }
+    final top5 = _displayResults.where((r) => r.isAlive || r.tier == IpTier.usable || r.tier == IpTier.weak).take(5).toList();
+    if (top5.isEmpty) { _showSnack('No results!'); return; }
     Clipboard.setData(ClipboardData(text: top5.map((r) => r.ip).join('\n')));
     _showSnack('✓ Top 5 copied!');
   }
