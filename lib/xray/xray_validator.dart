@@ -143,6 +143,11 @@ Future<String?> _findXrayBinary() async {
   return null;
 }
 
+// ─── Public API ──────────────────────────────────────────────────────────────
+
+/// Expose the private [_findXrayBinary] as a public API.
+Future<String?> findXrayBinary() => _findXrayBinary();
+
 // ─── Xray binary validation ───────────────────────────────────────────────────
 
 Future<XrayValidationResult> _validateWithXray(
@@ -347,9 +352,121 @@ Future<_ConnResult> _socks5ConnectivityCheck(
 }
 
 Future<double> _measureSocks5Speed(int socksPort, {required Duration timeout}) async {
-  // TODO: route HTTP through SOCKS5 proxy to measure real speed
-  // For now returns 0 — will be implemented when xray binary is available
-  return 0.0;
+  // Route HTTP GET through SOCKS5 proxy to measure real download speed in KB/s
+  Socket? sock;
+  try {
+    sock = await Socket.connect('127.0.0.1', socksPort, timeout: timeout);
+    sock.setOption(SocketOption.tcpNoDelay, true);
+
+    // ── SOCKS5 handshake (no auth) ────────────────────────────────────────
+    sock.add([0x05, 0x01, 0x00]);
+    await sock.flush();
+
+    // Read server choice
+    final handshakeBuf = <int>[];
+    final handshakeCompleter = Completer<void>();
+    final handshakeSub = sock.listen(
+      (d) {
+        handshakeBuf.addAll(d);
+        if (handshakeBuf.length >= 2 && !handshakeCompleter.isCompleted) {
+          handshakeCompleter.complete();
+        }
+      },
+      onDone: () { if (!handshakeCompleter.isCompleted) handshakeCompleter.complete(); },
+      onError: (_) { if (!handshakeCompleter.isCompleted) handshakeCompleter.complete(); },
+      cancelOnError: true,
+    );
+    await handshakeCompleter.future
+        .timeout(const Duration(seconds: 3))
+        .catchError((_) {});
+    await handshakeSub.cancel();
+
+    if (handshakeBuf.length < 2 || handshakeBuf[0] != 0x05 || handshakeBuf[1] == 0xFF) {
+      return 0.0;
+    }
+
+    // ── SOCKS5 CONNECT to speed.cloudflare.com:80 ────────────────────────
+    const host = 'speed.cloudflare.com';
+    final hostBytes = utf8.encode(host);
+    final connectCmd = <int>[
+      0x05, 0x01, 0x00,       // VER, CMD=CONNECT, RSV
+      0x03,                   // ATYP=domain
+      hostBytes.length,       // domain length
+      ...hostBytes,           // domain
+      0x00, 0x50,             // port 80 (big-endian)
+    ];
+    sock.add(connectCmd);
+    await sock.flush();
+
+    // Read CONNECT response (at least 10 bytes)
+    final connectBuf = <int>[];
+    final connectCompleter = Completer<void>();
+    final connectSub = sock.listen(
+      (d) {
+        connectBuf.addAll(d);
+        if (connectBuf.length >= 10 && !connectCompleter.isCompleted) {
+          connectCompleter.complete();
+        }
+      },
+      onDone: () { if (!connectCompleter.isCompleted) connectCompleter.complete(); },
+      onError: (_) { if (!connectCompleter.isCompleted) connectCompleter.complete(); },
+      cancelOnError: true,
+    );
+    await connectCompleter.future
+        .timeout(const Duration(seconds: 5))
+        .catchError((_) {});
+    await connectSub.cancel();
+
+    if (connectBuf.length < 2 || connectBuf[1] != 0x00) {
+      return 0.0; // CONNECT rejected
+    }
+
+    // ── HTTP GET ~100KB ───────────────────────────────────────────────────
+    const httpReq =
+        'GET /__down?bytes=102400 HTTP/1.1\r\n'
+        'Host: speed.cloudflare.com\r\n'
+        'User-Agent: MidONe/1.0\r\n'
+        'Connection: close\r\n\r\n';
+    sock.add(utf8.encode(httpReq));
+    await sock.flush();
+
+    // Read until ~100KB downloaded or timeout
+    int bytesRead = 0;
+    bool headersDone = false;
+    final startTime = DateTime.now();
+    final downloadCompleter = Completer<void>();
+    final downloadSub = sock.listen(
+      (d) {
+        if (!headersDone) {
+          // Skip past HTTP headers
+          final chunk = utf8.decode(d, allowMalformed: true);
+          final sep = chunk.indexOf('\r\n\r\n');
+          if (sep >= 0) {
+            headersDone = true;
+            bytesRead += d.length - (sep + 4);
+          }
+        } else {
+          bytesRead += d.length;
+        }
+        if (bytesRead >= 102400 && !downloadCompleter.isCompleted) {
+          downloadCompleter.complete();
+        }
+      },
+      onDone: () { if (!downloadCompleter.isCompleted) downloadCompleter.complete(); },
+      onError: (_) { if (!downloadCompleter.isCompleted) downloadCompleter.complete(); },
+      cancelOnError: true,
+    );
+    await downloadCompleter.future.timeout(timeout).catchError((_) {});
+    await downloadSub.cancel();
+
+    final elapsed = DateTime.now().difference(startTime).inMicroseconds / 1e6;
+    if (elapsed <= 0 || bytesRead <= 0) return 0.0;
+    return bytesRead / 1024.0 / elapsed; // KB/s
+  } catch (_) {
+    return 0.0;
+  } finally {
+    try { sock?.destroy(); } catch (_) {}
+  }
 }
 
 Future<bool> _waitForPort(String host, int port, {required Duration timeout}) async {
