@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -221,6 +222,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _dnsUpdating = false;
   String? _dnsUpdateMessage;
 
+  // ── DNS Apply (Windows) state ─────────────────────────────────────────────
+  String? _appliedDnsIp;
+  bool _applyingDns = false;
+  String? _applyDnsError;
+  String? _applyDnsMessage;
+  Timer? _dnsMonitorTimer;
+  double? _dnsMonLat;
+  double? _dnsMonJitter;
+  double? _dnsMonLoss;
+  int _dnsMonSamples = 0;
+  int _dnsMonFails = 0;
+  final List<double> _dnsMonLatHistory = [];
+
   // ── Range v2 state ────────────────────────────────────────────────────────
   String _rangeCdnProfile = 'cloudflare'; // 'cloudflare' or 'akamai'
   List<String> _rangeCidrs = [];
@@ -274,6 +288,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _randomCountController.dispose();
     _customCidrController.dispose();
     _dnsScanSubscription?.cancel();
+    _dnsMonitorTimer?.cancel();
     super.dispose();
   }
 
@@ -1657,6 +1672,540 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DNS Apply — Windows only
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Future<void> _applyDns(String ip) async {
+    if (!Platform.isWindows) {
+      _showSnack('Apply DNS is only supported on Windows.');
+      return;
+    }
+    setState(() {
+      _applyingDns = true;
+      _applyDnsError = null;
+      _applyDnsMessage = null;
+    });
+    try {
+      final ifResult = await Process.run(
+        'netsh', ['interface', 'show', 'interface'],
+        runInShell: true,
+      );
+      final activeIface = _parseActiveInterface(ifResult.stdout.toString());
+      if (activeIface == null) {
+        setState(() {
+          _applyingDns = false;
+          _applyDnsError = 'No active network interface found. Check your connection.';
+        });
+        return;
+      }
+      final r1 = await Process.run(
+        'netsh', ['interface', 'ip', 'set', 'dns', activeIface, 'static', ip],
+        runInShell: true,
+      );
+      if (r1.exitCode == 0) {
+        _startDnsMonitor(ip);
+        setState(() {
+          _appliedDnsIp = ip;
+          _applyingDns = false;
+          _applyDnsMessage = '✓ DNS applied on "$activeIface"';
+          _applyDnsError = null;
+        });
+      } else {
+        setState(() {
+          _applyingDns = false;
+          _applyDnsError = 'Failed (exit ${r1.exitCode}). Please run as Administrator.';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _applyingDns = false;
+        _applyDnsError = 'Error: $e';
+      });
+    }
+  }
+
+  String? _parseActiveInterface(String netshOutput) {
+    final lines = netshOutput.split('\n');
+    for (final line in lines) {
+      final trimmed = line.trim();
+      if (trimmed.contains('Connected') && trimmed.contains('Enabled')) {
+        final parts = trimmed.split(RegExp(r'\s{2,}'));
+        if (parts.length >= 4) return parts.last.trim();
+      }
+    }
+    // Fallback: try common names
+    for (final line in lines) {
+      final t = line.trim();
+      if (t.contains('Connected')) {
+        final parts = t.split(RegExp(r'\s{2,}'));
+        if (parts.length >= 4) return parts.last.trim();
+      }
+    }
+    return null;
+  }
+
+  Future<void> _resetDns() async {
+    if (!Platform.isWindows) return;
+    setState(() { _applyingDns = true; _applyDnsError = null; });
+    try {
+      final ifResult = await Process.run(
+        'netsh', ['interface', 'show', 'interface'], runInShell: true);
+      final activeIface = _parseActiveInterface(ifResult.stdout.toString());
+      if (activeIface == null) {
+        setState(() { _applyingDns = false; });
+        return;
+      }
+      await Process.run(
+        'netsh', ['interface', 'ip', 'set', 'dns', activeIface, 'dhcp'],
+        runInShell: true,
+      );
+      _stopDnsMonitor();
+      setState(() {
+        _appliedDnsIp = null;
+        _applyingDns = false;
+        _applyDnsMessage = '✓ DNS reset to Automatic (DHCP)';
+        _applyDnsError = null;
+        _dnsMonLat = null;
+        _dnsMonJitter = null;
+        _dnsMonLoss = null;
+        _dnsMonSamples = 0;
+        _dnsMonFails = 0;
+        _dnsMonLatHistory.clear();
+      });
+    } catch (e) {
+      setState(() { _applyingDns = false; _applyDnsError = 'Error: $e'; });
+    }
+  }
+
+  void _startDnsMonitor(String ip) {
+    _stopDnsMonitor();
+    _dnsMonSamples = 0;
+    _dnsMonFails = 0;
+    _dnsMonLatHistory.clear();
+    setState(() { _dnsMonLat = null; _dnsMonJitter = null; _dnsMonLoss = null; });
+    _dnsMonitorTimer = Timer.periodic(const Duration(seconds: 2), (_) => _dnsMonitorTick(ip));
+    _dnsMonitorTick(ip);
+  }
+
+  void _stopDnsMonitor() {
+    _dnsMonitorTimer?.cancel();
+    _dnsMonitorTimer = null;
+  }
+
+  Future<void> _dnsMonitorTick(String ip) async {
+    if (!mounted) return;
+    Socket? sock;
+    double latency = 9999;
+    bool alive = false;
+    try {
+      final t = DateTime.now();
+      sock = await Socket.connect(ip, 53, timeout: const Duration(seconds: 2));
+      latency = DateTime.now().difference(t).inMilliseconds.toDouble();
+      alive = true;
+      await sock.close();
+      sock.destroy();
+    } catch (_) {
+      try { sock?.destroy(); } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() {
+      _dnsMonSamples++;
+      if (!alive) {
+        _dnsMonFails++;
+      } else {
+        _dnsMonLatHistory.add(latency);
+        if (_dnsMonLatHistory.length > 20) _dnsMonLatHistory.removeAt(0);
+        final n = _dnsMonLatHistory.length;
+        _dnsMonLat = _dnsMonLatHistory.reduce((a, b) => a + b) / n;
+        if (n >= 2) {
+          final mean = _dnsMonLat!;
+          final variance = _dnsMonLatHistory
+              .map((v) => (v - mean) * (v - mean))
+              .reduce((a, b) => a + b) / n;
+          _dnsMonJitter = math.sqrt(variance);
+        }
+      }
+      if (_dnsMonSamples > 0) {
+        _dnsMonLoss = (_dnsMonFails / _dnsMonSamples) * 100;
+      }
+    });
+  }
+
+  String _dnsGamingGrade() {
+    final lat = _dnsMonLat ?? 9999;
+    final jit = _dnsMonJitter ?? 9999;
+    final loss = _dnsMonLoss ?? 100;
+    if (lat < 20 && jit < 5 && loss < 1) return '⚡ EXCELLENT — Pro Gaming';
+    if (lat < 50 && jit < 15 && loss < 2) return '✅ GOOD — Gaming Ready';
+    if (lat < 100 && jit < 30 && loss < 5) return '⚠️ FAIR — Playable';
+    return '❌ POOR — Not Recommended';
+  }
+
+  Color _dnsGamingColor() {
+    final lat = _dnsMonLat ?? 9999;
+    final jit = _dnsMonJitter ?? 9999;
+    final loss = _dnsMonLoss ?? 100;
+    if (lat < 20 && jit < 5 && loss < 1) return const Color(0xFF00FF88);
+    if (lat < 50 && jit < 15 && loss < 2) return const Color(0xFF69FF47);
+    if (lat < 100 && jit < 30 && loss < 5) return const Color(0xFFFFD060);
+    return Colors.redAccent;
+  }
+
+  Widget _buildDnsStatusPanel() {
+    final lat = _dnsMonLat;
+    final jit = _dnsMonJitter;
+    final loss = _dnsMonLoss;
+    final ready = lat != null;
+
+    Color latColor(double v) =>
+        v < 20 ? const Color(0xFF00FF88) : v < 50 ? const Color(0xFF69FF47) : v < 100 ? const Color(0xFFFFD060) : Colors.redAccent;
+    Color jitColor(double v) =>
+        v < 5 ? const Color(0xFF00FF88) : v < 15 ? const Color(0xFF69FF47) : v < 30 ? const Color(0xFFFFD060) : Colors.redAccent;
+    Color lossColor(double v) =>
+        v < 1 ? const Color(0xFF00FF88) : v < 5 ? const Color(0xFFFFD060) : Colors.redAccent;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D1F2D),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.4), width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header
+          Row(
+            children: [
+              Container(
+                width: 8, height: 8,
+                decoration: BoxDecoration(
+                  color: ready ? const Color(0xFF00FF88) : const Color(0xFFFFD060),
+                  shape: BoxShape.circle,
+                  boxShadow: [BoxShadow(color: ready ? const Color(0xFF00FF88) : const Color(0xFFFFD060), blurRadius: 6)],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                ready ? 'DNS Connected' : 'Connecting…',
+                style: GoogleFonts.inter(
+                  color: const Color(0xFF00E5FF),
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                _appliedDnsIp ?? '',
+                style: GoogleFonts.robotoMono(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          if (ready) ...[
+            const SizedBox(height: 12),
+            // Gaming Grade Banner
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: _dnsGamingColor().withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _dnsGamingColor().withOpacity(0.5)),
+              ),
+              child: Text(
+                _dnsGamingGrade(),
+                style: GoogleFonts.inter(
+                  color: _dnsGamingColor(),
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 12),
+            // Metrics row
+            Row(
+              children: [
+                _dnsMetricBox('LATENCY', '${lat.toStringAsFixed(1)}ms', latColor(lat)),
+                const SizedBox(width: 8),
+                _dnsMetricBox('JITTER', jit != null ? '${jit.toStringAsFixed(1)}ms' : '--', jit != null ? jitColor(jit) : Colors.white38),
+                const SizedBox(width: 8),
+                _dnsMetricBox('LOSS', loss != null ? '${loss.toStringAsFixed(1)}%' : '--', loss != null ? lossColor(loss) : Colors.white38),
+                const SizedBox(width: 8),
+                _dnsMetricBox('SAMPLES', '$_dnsMonSamples', Colors.white38),
+              ],
+            ),
+            const SizedBox(height: 10),
+            // Mini latency bar chart (last 10 samples)
+            if (_dnsMonLatHistory.length >= 2) _buildLatencySparkline(),
+          ] else ...[
+            const SizedBox(height: 8),
+            const LinearProgressIndicator(
+              backgroundColor: Colors.white12,
+              color: Color(0xFF00E5FF),
+              minHeight: 3,
+            ),
+          ],
+          const SizedBox(height: 12),
+          // Reset button
+          OutlinedButton.icon(
+            onPressed: _applyingDns ? null : _resetDns,
+            icon: const Icon(Icons.dns_outlined, size: 15),
+            label: Text('Reset to Auto DNS', style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 12)),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.white54,
+              side: const BorderSide(color: Colors.white24),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dnsMetricBox(String label, String value, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.07),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withOpacity(0.25)),
+        ),
+        child: Column(
+          children: [
+            Text(label, style: TextStyle(fontSize: 8, color: Colors.white38, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+            const SizedBox(height: 3),
+            Text(value, style: TextStyle(fontSize: 13, color: color, fontWeight: FontWeight.w800)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLatencySparkline() {
+    final hist = _dnsMonLatHistory.length > 10 ? _dnsMonLatHistory.sublist(_dnsMonLatHistory.length - 10) : _dnsMonLatHistory;
+    final maxVal = hist.reduce(math.max);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('LATENCY HISTORY', style: const TextStyle(fontSize: 8, color: Colors.white38, letterSpacing: 0.8, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 4),
+        SizedBox(
+          height: 28,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: hist.map((v) {
+              final h = maxVal > 0 ? (v / maxVal).clamp(0.1, 1.0) : 0.1;
+              Color c = v < 20 ? const Color(0xFF00FF88) : v < 50 ? const Color(0xFF69FF47) : v < 100 ? const Color(0xFFFFD060) : Colors.redAccent;
+              return Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 1),
+                  child: FractionallySizedBox(
+                    heightFactor: h,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: c.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+      ],
+    );
+  }
+
+
+  Widget _buildApplyDnsSection() {
+    final topServers = (_dnsResults ?? []).take(5).toList();
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0A1A1F),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.35), width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.dns_rounded, color: Color(0xFF00E5FF), size: 16),
+              const SizedBox(width: 8),
+              Text(
+                'APPLY DNS',
+                style: GoogleFonts.inter(
+                  color: const Color(0xFF00E5FF),
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1A2A1A),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Text(
+                  '🎮 Game Optimizer',
+                  style: GoogleFonts.inter(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Select a DNS to apply system-wide. Run as Administrator for full access.',
+            style: GoogleFonts.inter(color: Colors.white38, fontSize: 11, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          // Top DNS server buttons
+          ...topServers.asMap().entries.map((e) {
+            final s = e.value;
+            final rank = s.finalRank ?? (e.key + 1);
+            final lat = s.avgLatencyMs?.toStringAsFixed(0) ?? '?';
+            final freedom = ((s.freedomScore ?? 0) * 100).toStringAsFixed(0);
+            final score = s.finalScore?.toStringAsFixed(1) ?? '?';
+            final isApplied = _appliedDnsIp == s.ip;
+            final isApplying = _applyingDns && _appliedDnsIp == null;
+
+            Color rankColor = switch (rank) {
+              1 => const Color(0xFFFFD700),
+              2 => const Color(0xFFC0C0C0),
+              3 => const Color(0xFFCD7F32),
+              _ => Colors.white24,
+            };
+
+            return GestureDetector(
+              onTap: isApplied || isApplying ? null : () => _applyDns(s.ip),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                margin: const EdgeInsets.only(bottom: 7),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: isApplied
+                      ? const Color(0xFF00E5FF).withOpacity(0.1)
+                      : Colors.white.withOpacity(0.03),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isApplied
+                        ? const Color(0xFF00E5FF).withOpacity(0.6)
+                        : Colors.white12,
+                    width: isApplied ? 1.5 : 1,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    // Rank badge
+                    Container(
+                      width: 26,
+                      height: 26,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(color: rankColor, shape: BoxShape.circle),
+                      child: Text('#$rank',
+                          style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.black87)),
+                    ),
+                    const SizedBox(width: 10),
+                    // IP
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            s.ip,
+                            style: GoogleFonts.robotoMono(
+                              color: isApplied ? const Color(0xFF00E5FF) : Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              _applyStatChip('${lat}ms', Colors.white38),
+                              const SizedBox(width: 6),
+                              _applyStatChip('Free ${freedom}%', const Color(0xFF69FF47)),
+                              const SizedBox(width: 6),
+                              _applyStatChip('Score $score', const Color(0xFF00E5FF)),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Apply button / status
+                    if (isApplied)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF00E5FF).withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.5)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.check_circle_rounded, color: Color(0xFF00E5FF), size: 13),
+                            const SizedBox(width: 4),
+                            Text('Applied',
+                                style: GoogleFonts.inter(color: const Color(0xFF00E5FF), fontSize: 11, fontWeight: FontWeight.w700)),
+                          ],
+                        ),
+                      )
+                    else if (isApplying)
+                      const SizedBox(
+                        width: 18, height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E5FF)),
+                      )
+                    else
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF00E5FF).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.4)),
+                        ),
+                        child: Text(
+                          'Apply',
+                          style: GoogleFonts.inter(
+                            color: const Color(0xFF00E5FF),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _applyStatChip(String text, Color color) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.08),
+      borderRadius: BorderRadius.circular(4),
+    ),
+    child: Text(text, style: TextStyle(fontSize: 9, color: color, fontWeight: FontWeight.w600)),
+  );
+
   // ── DNS Card ──────────────────────────────────────────────────────────────
   Widget _buildDnsCard() {
     return _card(
@@ -1696,7 +2245,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ],
             ],
           ),
-          // DNS action buttons: Copy Top 5 + Update Online
+          // DNS action buttons: Copy Top 5 + Update Online + Apply DNS
           const SizedBox(height: 8),
           Row(
             children: [
@@ -1712,6 +2261,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ],
           ),
+          // Apply DNS (Windows only)
+          if (Platform.isWindows && _dnsResults != null && _dnsResults!.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _buildApplyDnsSection(),
+          ],
+          // DNS Status Monitor panel
+          if (_appliedDnsIp != null) _buildDnsStatusPanel(),
+          if (_applyDnsMessage != null && _appliedDnsIp == null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(_applyDnsMessage!,
+                  style: const TextStyle(color: Color(0xFF69FF47), fontSize: 12)),
+            ),
+          if (_applyDnsError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(_applyDnsError!,
+                  style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+            ),
           if (_dnsUpdateMessage != null)
             Padding(
               padding: const EdgeInsets.only(top: 4),
