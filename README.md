@@ -11,7 +11,7 @@
 
 <br/>
 
-[**⬇️ دانلود APK**](https://github.com/mwhammadrezss/midonescanner-android/releases/download/v6.2-flutter-build90/app-release.apk) &nbsp;·&nbsp; [**📣 کانال تلگرام**](https://t.me/mmdrlx)
+[**⬇️ دانلود APK**](https://github.com/mwhammadrezss/midonescanner-android/releases/download/v7.0.1/MidONeScannerV7.0.1.apk) &nbsp;·&nbsp; [**📣 کانال تلگرام**](https://t.me/mmdrlx)
 
 </div>
 
