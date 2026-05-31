@@ -245,7 +245,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Show config section expanded
   bool _cfConfigExpanded = false;
   // Sample count presets
-  static const _cfCountPresets = [100, 500, 1000, 5000, 20000];
+  static const _cfCountPresets = [100, 500, 1000, 5000, 20000, 50000, 100000];
   int _cfCountPresetIdx = 2; // default: 1000
   // Timeout presets (ms)
   static const _cfTimeoutPresets = [3000, 5000, 8000, 12000];
@@ -1669,7 +1669,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             onTap: () => setState(() => _cfConfigExpanded = !_cfConfigExpanded),
             child: Row(
               children: [
-                Text('XRAY CONFIG (optional)',
+                Text('CONFIG (VLESS/TROJAN) — optional',
                     style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 1.2)),
                 const Spacer(),
                 if (_cfParsedConfig != null)
@@ -1696,7 +1696,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               onChanged: (_) => _parseCfConfig(),
               style: GoogleFonts.robotoMono(color: textPrimary, fontSize: 12),
               decoration: InputDecoration(
-                hintText: 'vless://uuid@host:port?type=ws&security=tls&sni=...#remark\nor trojan://...',
+                hintText: 'vless://uuid@host:port?type=ws&path=/ray&host=cdn.example.com&security=tls&sni=...\nor trojan://password@host:port?type=ws&path=/ray...',
                 hintStyle: GoogleFonts.robotoMono(color: textSecond, fontSize: 11),
                 filled: true, fillColor: card2Color,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
@@ -1797,7 +1797,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               children: [
                 Text(
                   _cfPhase2Total > 0
-                      ? 'Phase 2: Xray validation...'
+                      ? 'Phase 2: Config validation...'
                       : _cfPhase1Done
                           ? 'Phase 1 done — ${_cfPhase1Results.where((r) => r.isEdge).length} CF edges'
                           : 'Phase 1: CF edge detection...',
@@ -1832,7 +1832,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           if (_cfPhase2Results.isNotEmpty) ...[
             Row(
               children: [
-                Text('${_cfPhase2Results.where((r) => r.success).length} Xray OK',
+                Text('${_cfPhase2Results.where((r) => r.success).length} Config OK',
                     style: GoogleFonts.inter(color: const Color(0xFF69FF47), fontSize: 12, fontWeight: FontWeight.w700)),
                 const SizedBox(width: 10),
                 Text('${_cfPhase2Results.length} tested',
@@ -2061,7 +2061,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  // ── Phase 2 result card (Xray validated) ──────────────────────────────────
+  // ── Phase 2 result card (Config validated) ──────────────────────────────────
   Widget _cfPhase2ResultCard(CfPhase2Result r) {
     final ok = r.success;
     final accent = ok ? const Color(0xFF69FF47) : const Color(0xFFFF5252);
@@ -2083,7 +2083,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   spacing: 6,
                   children: [
                     Text(r.ip, style: GoogleFonts.robotoMono(color: textPrimary, fontWeight: FontWeight.w700, fontSize: 13)),
-                    _cfBadge(ok ? 'Xray OK' : 'Xray FAIL', accent),
+                    _cfBadge(ok ? 'Config OK' : 'Config FAIL', accent),
                     if (r.phase1.colo.isNotEmpty) _cfBadge(r.phase1.colo, const Color(0xFF00E5FF)),
                   ],
                 ),
