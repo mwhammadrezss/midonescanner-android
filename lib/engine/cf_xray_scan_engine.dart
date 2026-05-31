@@ -137,7 +137,7 @@ Future<List<CfPhase2Result>> runCfXrayScanner({
           phase1: p1,
           validation: XrayValidationResult(
             ip: p1.ip,
-            port: config?.port ?? 443,
+            port: 443,
             success: p1.isEdge,
             latencyMs: p1.latencyMs,
           ),
