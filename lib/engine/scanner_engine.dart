@@ -419,6 +419,17 @@ Future<List<ScanResult>> runScanningEngine(
   final _scanCompleters = <Completer<void>>[];
   final totalLive = liveIps.length;
 
+  // progress: start event (0%) — signals scan has begun
+  if (totalLive > 0) {
+    final _startResult = ScanResult(
+      ip: liveIps.first, latencyMs: 0, jitterMs: 0, isAlive: false,
+      grade: '-', country: '', flag: '', loss: 0, reliability: 0,
+      score: null, survivalMs: null, retransmits: 0,
+      phase: ScanPhase.tlsFail, tier: IpTier.dead, dpiSuspicion: 0,
+    );
+    onProgress?.call(0, totalLive, _startResult);
+  }
+
   await Future.wait(liveIps.map((ip) async {
     if (cancelCheck()) return;
 
@@ -448,6 +459,11 @@ Future<List<ScanResult>> runScanningEngine(
       }
     }
   }));
+
+  // progress: done event (100%) — signals all IPs processed
+  if (totalLive > 0 && results.isNotEmpty) {
+    onProgress?.call(totalLive, totalLive, results.last);
+  }
 
   // ── Step 2: Sort by tier → score → latency ────────────────────────────────
   results.sort((a, b) {
