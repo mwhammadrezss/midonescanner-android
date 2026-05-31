@@ -25,35 +25,7 @@
 > **داده واقعی دانلود می‌کند.** سرعتی که اپ نشان می‌دهد، همان چیزی است که در واقعیت تجربه خواهید کرد.
 
 ---
-
-## ⚙️ Architecture & How It Works
-
-### 🧵 Parallel Processing (Multi-thread)
-The app runs on a multi-threaded architecture, scanning dozens of IPs simultaneously — with zero UI lag or freezes.
-
-### 🌐 Smart CDN Detection
-The CDN Detection system sends valid SNIs matched to each server, bypassing filtering systems and simulating a secure, open connection.
-
-**Supported CDNs:**
-`Cloudflare` · `Akamai` · `Google` · `Amazon CloudFront` · `Azure` · `Fastly` · `Iranian CDNs`
-
-### 🔁 5× Stability Test (Reliability)
-To eliminate unstable IPs, each one is tested **five consecutive times** under network load. Any IP that registers Packet Loss or Timeout is immediately removed from the list.
-
-### 📡 Real Speed Test
-Instead of ping, actual data is downloaded. If an ISP throttles speed after a few seconds **(Throttle)**, it's instantly detected and separated from the results.
-
-### 📊 Scoring Algorithm
-A precise mathematical formula combines four factors:
-
-```
-Score = (Speed × 0.55) + (Latency × 0.20) + (Jitter × 0.10) + (Reliability × 0.15)
-```
-
-Output: a ranked list — no fake IPs, ready to use.
-
----
-
+how ? 
 ## 🔬 Under the Hood — Scan Engine Pipelines
 
 > For technical and semi-technical users: here's exactly what happens behind the scenes in each scan mode.
