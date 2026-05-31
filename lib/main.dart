@@ -1071,7 +1071,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _exportJson() async {
     if (_results.isEmpty) { _showSnack('No results!'); return; }
     try {
-      final dir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
+      final dir = Platform.isAndroid ? (await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory()) : await getApplicationDocumentsDirectory();
       final folder = Directory('${dir.path}/MidONeScanner');
       await folder.create(recursive: true);
       final ts = DateTime.now().toString().replaceAll(RegExp(r'[: ]'), '_').substring(0, 19);
@@ -1096,7 +1096,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _saveResults() async {
     if (_results.isEmpty) { _showSnack('No results!'); return; }
     try {
-      final dir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
+      final dir = Platform.isAndroid ? (await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory()) : await getApplicationDocumentsDirectory();
       final folder = Directory('${dir.path}/MidONeScanner');
       await folder.create(recursive: true);
       final ts = DateTime.now().toString().replaceAll(RegExp(r'[: ]'), '_').substring(0, 19);
