@@ -38,3 +38,13 @@ target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
+
+# Require administrator via UAC manifest (Windows only).
+# /MANIFESTUAC sets the executionLevel in the linker-generated manifest fragment,
+# which mt.exe merges with runner.exe.manifest (dpiAwareness). No trustInfo
+# conflict because runner.exe.manifest does NOT contain a trustInfo section.
+if(MSVC)
+  target_link_options(${BINARY_NAME} PRIVATE
+    "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'"
+  )
+endif()
