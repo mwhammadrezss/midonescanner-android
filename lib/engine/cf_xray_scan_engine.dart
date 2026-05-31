@@ -21,6 +21,17 @@ import '../xray/xray_validator.dart';
 import 'cf_ip_ranges.dart';
 import 'probe_engine.dart' show cfHttpProbe, cfWsProbe, CfHttpResult;
 
+
+// ─── Validation mode ──────────────────────────────────────────────────────────
+
+/// Controls which Phase-2 validation method is used.
+enum CfValidationMode {
+  /// Fast WS probe (Mode A): uses cfWsProbe / config path matching. No xray binary.
+  wsProbe,
+  /// Deep xray binary validation (Mode B): runs xray.exe, tests real traffic + speed.
+  xrayBinary,
+}
+
 // ─── Phase 1 result ───────────────────────────────────────────────────────────
 
 class CfPhase1Result {
@@ -100,6 +111,7 @@ Future<List<CfPhase2Result>> runCfXrayScanner({
   required OnPhase2Progress onPhase2Progress,
   required IsCancelledFn isCancelled,
   List<String>? cidrFilter,
+  CfValidationMode validationMode = CfValidationMode.wsProbe,
 }) async {
   // ── Prepare IP list ────────────────────────────────────────────────────────
   final List<String> scanIps;
@@ -201,6 +213,56 @@ Future<List<CfPhase2Result>> runCfXrayScanner({
           ),
         )).toList();
   }
+
+  // ── Gather CF edge IPs sorted by latency (shared by both modes) ──────────
+  final List<CfPhase1Result> edgeIps = phase1Results
+      .where((r) => r.isEdge)
+      .toList()
+    ..sort((a, b) => a.latencyMs.compareTo(b.latencyMs));
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // MODE B: Xray binary deep validation
+  // ══════════════════════════════════════════════════════════════════════════
+  if (validationMode == CfValidationMode.xrayBinary) {
+    final phase2Results = <CfPhase2Result>[];
+    int p2Done = 0;
+    final total2 = edgeIps.length;
+
+    // Use reduced concurrency for xray (heavier process)
+    final xrayConcurrency = concurrency < 3 ? concurrency : 3;
+    final xraySem = _Semaphore(xrayConcurrency);
+
+    await Future.wait(edgeIps.map((p1) async {
+      if (isCancelled()) return;
+      await xraySem.acquire();
+      try {
+        if (isCancelled()) return;
+        final validation = await validateConfig(
+          config,
+          p1.ip,
+          timeoutMs: timeoutMs,
+        );
+        final r = CfPhase2Result(phase1: p1, validation: validation);
+        phase2Results.add(r);
+        p2Done++;
+        onPhase2Progress(r, p2Done, total2);
+      } finally {
+        xraySem.release();
+      }
+    }));
+
+    // Sort: successes first, then by latency
+    phase2Results.sort((a, b) {
+      if (a.success && !b.success) return -1;
+      if (!a.success && b.success) return 1;
+      return a.phase1.latencyMs.compareTo(b.phase1.latencyMs);
+    });
+    return phase2Results;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // MODE A (default): WS probe validation — keep existing logic
+  // ══════════════════════════════════════════════════════════════════════════
 
   // ── Phase 2: Collect ALL config-validated IPs (SenPai IsHealthy()) ────────
   // IsHealthy() ≡ tlsOk && httpStatus<400 && (!requireWS || wsHealthy)
