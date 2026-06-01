@@ -40,16 +40,6 @@ class StructuredLogger {
 
   String exportJson() => const JsonEncoder.withIndent('  ').convert(_buffer);
 
-  // p53: save failed session logs for replay
-  Future<void> saveFailureLogs() async {
-    try {
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/midone_failure_logs.json');
-      final failures = _buffer.where((e) => e['error'] != null).toList();
-      await file.writeAsString(const JsonEncoder.withIndent('  ').convert(failures));
-    } catch (_) {}
-  }
-
   Future<void> saveToFile() async {
     try {
       final dir = await getApplicationDocumentsDirectory();
