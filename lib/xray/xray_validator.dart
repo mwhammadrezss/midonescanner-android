@@ -147,7 +147,7 @@ Future<XrayValidationResult> _validateWithXray(
   Directory? tmpDir;
   File? tmpFile;
   Process? xrayProcess;
-  StringBuffer? stderrBuf;
+  final stderrBuf = StringBuffer();  // non-nullable; always safe to write/read
 
   try {
     tmpDir = await Directory.systemTemp.createTemp('xray_');
@@ -164,7 +164,6 @@ Future<XrayValidationResult> _validateWithXray(
     );
 
     // Capture stderr from xray process for diagnostics
-    stderrBuf = StringBuffer();
     xrayProcess.stderr
         .transform(const SystemEncoding().decoder)
         .listen((s) { stderrBuf.write(s); });
@@ -228,7 +227,7 @@ Future<XrayValidationResult> _validateWithXray(
   } catch (e) {
     // Include any xray stderr in the error message for diagnostics
     await Future.delayed(const Duration(milliseconds: 100));
-    final stderrMsg = stderrBuf?.toString().trim() ?? '';
+    final stderrMsg = stderrBuf.toString().trim();
     final errMsg = stderrMsg.isNotEmpty
         ? '${e.toString()}\nXray stderr: $stderrMsg'
         : e.toString();
