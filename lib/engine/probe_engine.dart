@@ -350,6 +350,11 @@ class CfMultiProbeResult {
   final double maxMs;
   final double jitterMs;
   final double lossPercent;
+  // Speed+WS fields — mirrors SenPai SpeedTested, Throughput, RequireWS, WSOk
+  final double throughputKBs; // 0 = not tested
+  final bool   speedTested;   // true when download check was attempted
+  final bool   wsOk;          // WebSocket probe survived idle-hold test
+  final bool   requireWs;     // true when WS success is part of health criteria
 
   const CfMultiProbeResult({
     required this.tlsOk,
@@ -361,17 +366,31 @@ class CfMultiProbeResult {
     required this.maxMs,
     required this.jitterMs,
     required this.lossPercent,
+    this.throughputKBs = 0,
+    this.speedTested   = false,
+    this.wsOk          = false,
+    this.requireWs     = false,
   });
 
-  // IsHealthy() — mirrors SenPai result.IsHealthy() for ModeHTTP
-  // loss < 50% AND avg > 0 AND tlsOk AND 2xx-3xx AND colo present
-  bool get isCloudflareEdge =>
-      lossPercent < 50 &&
-      avgMs > 0 &&
-      tlsOk &&
-      httpStatus >= 200 &&
-      httpStatus < 400 &&
-      colo.isNotEmpty;
+  // IsHealthy() — mirrors SenPai result.IsHealthy() for ModeHTTP exactly
+  // Conditions (in order):
+  //   loss >= 50% OR avg <= 0            → false  (always)
+  //   port != 80 AND !tlsOk              → false  (port 80 = plain HTTP, no TLS needed)
+  //   httpStatus < 200 OR >= 400         → false
+  //   colo empty                         → false
+  //   speedTested AND throughputKBs <= 0 → false  (SenPai: SpeedTested && Throughput<=0)
+  //   requireWs AND !wsOk                → false  (SenPai: RequireWS && !WSOk)
+  bool isHealthy({int port = 443}) {
+    if (lossPercent >= 50 || avgMs <= 0) return false;
+    if (port != 80 && !tlsOk) return false;
+    if (httpStatus < 200 || httpStatus >= 400 || colo.isEmpty) return false;
+    if (speedTested && throughputKBs <= 0) return false;
+    if (requireWs && !wsOk) return false;
+    return true;
+  }
+
+  // Convenience getter — assumes port 443 (standard CF scanner mode)
+  bool get isCloudflareEdge => isHealthy(port: 443);
 }
 
 /// Single raw probe — one try: connect → TLS → GET /cdn-cgi/trace
