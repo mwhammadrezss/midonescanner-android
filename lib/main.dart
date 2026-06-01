@@ -4451,8 +4451,41 @@ class _DnsResultCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Text(server.ip,
-                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14)),
+                    GestureDetector(
+                      onTap: () {
+                        Clipboard.setData(ClipboardData(text: server.ip));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              '✓ \${server.ip} copied!',
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            duration: const Duration(seconds: 2),
+                            behavior: SnackBarBehavior.floating,
+                            backgroundColor: const Color(0xFF1E3525),
+                          ),
+                        );
+                      },
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            server.ip,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          const Icon(
+                            Icons.copy_rounded,
+                            size: 13,
+                            color: Colors.white38,
+                          ),
+                        ],
+                      ),
+                    ),
                     if (server.supportsDoH == true) ...[
                       const SizedBox(width: 6),
                       _DnsChip('DoH', const Color(0xFF00E5FF)),
