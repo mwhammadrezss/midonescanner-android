@@ -3913,7 +3913,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (_loadRangeCidrsGeneration != myGeneration) return; // stale, discard
       setState(() {
         _rangeCidrs = meta.fallback;
-        if (_selectedRangeCidrs.isEmpty and meta.fallback.isNotEmpty) _selectedRangeCidrs = {meta.fallback.first};
+        if (_selectedRangeCidrs.isEmpty && meta.fallback.isNotEmpty) _selectedRangeCidrs = {meta.fallback.first};
         _loadingRangeCidrs = false;
       });
     });
