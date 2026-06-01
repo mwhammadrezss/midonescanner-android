@@ -29,34 +29,6 @@ class WatchdogGuard {
   bool get isActive => _timer?.isActive ?? false;
 }
 
-/// p8: Per-phase deadline controller.
-/// Each phase gets its own deadline independent of global timeout.
-class PhaseDeadlineController {
-  final Map<String, WatchdogGuard> _guards = {};
-
-  /// Start deadline for [phase] with [timeout]. Fires [onTimeout] if exceeded.
-  void startPhase(String phase, Duration timeout, void Function() onTimeout) {
-    _guards[phase]?.cancel();
-    final guard = WatchdogGuard();
-    _guards[phase] = guard;
-    guard.start(timeout, onTimeout);
-  }
-
-  /// Mark phase as complete — cancels its watchdog.
-  void completePhase(String phase) {
-    _guards[phase]?.cancel();
-    _guards.remove(phase);
-  }
-
-  /// Cancel all active phase watchdogs.
-  void cancelAll() {
-    for (final guard in _guards.values) {
-      guard.cancel();
-    }
-    _guards.clear();
-  }
-}
-
 /// Run [fn] with a watchdog. If [fn] doesn't complete within [timeout],
 /// completes with [fallback] value.
 Future<T> withWatchdog<T>({
