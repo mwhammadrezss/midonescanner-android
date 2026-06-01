@@ -147,6 +147,7 @@ Future<XrayValidationResult> _validateWithXray(
   Directory? tmpDir;
   File? tmpFile;
   Process? xrayProcess;
+  StringBuffer? stderrBuf;
 
   try {
     tmpDir = await Directory.systemTemp.createTemp('xray_');
@@ -162,15 +163,27 @@ Future<XrayValidationResult> _validateWithXray(
       environment: {'XRAY_LOCATION_ASSET': geoDir},
     );
 
+    // Capture stderr from xray process for diagnostics
+    stderrBuf = StringBuffer();
+    xrayProcess.stderr
+        .transform(const SystemEncoding().decoder)
+        .listen((s) { stderrBuf.write(s); });
+
     final portReady = await _waitForPort('127.0.0.1', socksPort,
         timeout: const Duration(seconds: 5));
     if (!portReady) {
+      // Give stderr a moment to buffer
+      await Future.delayed(const Duration(milliseconds: 200));
+      final stderrMsg = stderrBuf.toString().trim();
+      final errDetail = stderrMsg.isNotEmpty
+          ? 'SOCKS port not ready after 5s\nXray stderr: $stderrMsg'
+          : 'SOCKS port not ready after 5s';
       return XrayValidationResult(
         ip: cfg.address,
         port: cfg.port,
         success: false,
         transport: cfg.network,
-        error: 'SOCKS port not ready after 5s',
+        error: errDetail,
       );
     }
 
@@ -213,12 +226,18 @@ Future<XrayValidationResult> _validateWithXray(
       transport: cfg.network,
     );
   } catch (e) {
+    // Include any xray stderr in the error message for diagnostics
+    await Future.delayed(const Duration(milliseconds: 100));
+    final stderrMsg = stderrBuf?.toString().trim() ?? '';
+    final errMsg = stderrMsg.isNotEmpty
+        ? '${e.toString()}\nXray stderr: $stderrMsg'
+        : e.toString();
     return XrayValidationResult(
       ip: cfg.address,
       port: cfg.port,
       success: false,
       transport: cfg.network,
-      error: e.toString(),
+      error: errMsg,
     );
   } finally {
     xrayProcess?.kill();
@@ -589,7 +608,7 @@ Future<bool> _waitForPort(String host, int port, {required Duration timeout}) as
 
 String _buildXrayConfigJson(XrayConfig cfg, int socksPort) {
   final config = {
-    'log': {'loglevel': 'none', 'access': '', 'error': ''},
+    'log': {'loglevel': 'warning', 'access': 'none', 'error': 'none'},
     'dns': {
       'servers': ['1.1.1.1', '8.8.8.8']
     },
