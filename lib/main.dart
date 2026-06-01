@@ -14,7 +14,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'engine/scanner_engine.dart';
-import 'engine/probe_engine.dart' show kDeepSniPresets, cfHttpProbe, cfWsProbe;
+import 'engine/probe_engine.dart' show kDeepSniPresets;
 import 'models/scan_result.dart' show ScanPhase, IpTier;
 import 'utils/ip_utils.dart' show validateAndExtractIps, isPrivateOrReserved;
 import 'geoip.dart';
