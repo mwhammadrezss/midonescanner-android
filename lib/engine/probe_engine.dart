@@ -5,6 +5,7 @@
 // p17: captivePortalDetector — enhanced cert validation
 // cf1: cfHttpProbe — HTTP GET /cdn-cgi/trace + colo detection (Cloudflare SNIs)
 // UPGRADED: throttle detection, randomized WS key, watchdog integration
+// SENPAI-SYNC: multi-try probe, latencies[], loss%, avg/min/max/jitter
 
 export '../models/probe_result.dart';
 import 'dart:async';
@@ -316,7 +317,11 @@ Future<double?> measureBandwidthKBs(
   return r.speedKBs;
 }
 
-// ── cf1: Cloudflare HTTP probe ───────────────────────────────────────────────
+// ── cf1: Cloudflare HTTP probe — SENPAI-SYNC ─────────────────────────────────
+// Now supports multiple tries per IP, measuring latency for each try.
+// Returns CfHttpMultiResult with latencies[], loss%, avg, min, max, jitter.
+// Mirrors SenPai prober.go: Probe() with cfg.Tries, r.Latencies[], r.Loss(), r.Avg()
+
 class CfHttpResult {
   final bool   tlsOk;
   final int    httpStatus;
@@ -332,78 +337,203 @@ class CfHttpResult {
       tlsOk && httpStatus >= 200 && httpStatus < 400 && colo.isNotEmpty;
 }
 
+/// Multi-try probe result — mirrors SenPai result.Result
+class CfMultiProbeResult {
+  final bool   tlsOk;
+  final int    httpStatus;
+  final String colo;
+  // Per-try latencies — 0 means failed try (mirrors SenPai Latencies[])
+  final List<double> latencies;
+  // Derived stats (mirrors SenPai result.go methods)
+  final double avgMs;
+  final double minMs;
+  final double maxMs;
+  final double jitterMs;
+  final double lossPercent;
+
+  const CfMultiProbeResult({
+    required this.tlsOk,
+    required this.httpStatus,
+    required this.colo,
+    required this.latencies,
+    required this.avgMs,
+    required this.minMs,
+    required this.maxMs,
+    required this.jitterMs,
+    required this.lossPercent,
+  });
+
+  // IsHealthy() — mirrors SenPai result.IsHealthy() for ModeHTTP
+  // loss < 50% AND avg > 0 AND tlsOk AND 2xx-3xx AND colo present
+  bool get isCloudflareEdge =>
+      lossPercent < 50 &&
+      avgMs > 0 &&
+      tlsOk &&
+      httpStatus >= 200 &&
+      httpStatus < 400 &&
+      colo.isNotEmpty;
+}
+
+/// Single raw probe — one try: connect → TLS → GET /cdn-cgi/trace
+/// Returns latencyMs (0 on failure) + CfHttpResult
+Future<({double latencyMs, CfHttpResult result})> _cfHttpProbeSingle(
+  String ip, {
+  String sni        = 'speed.cloudflare.com',
+  int budgetMs      = 5000,
+}) async {
+  Socket?             raw;
+  SecureSocket?       tls;
+  StreamSubscription? sub;
+  try {
+    final sw = Stopwatch()..start();
+
+    raw = await Socket.connect(
+      ip, 443,
+      timeout: Duration(milliseconds: budgetMs ~/ 4),
+    );
+    await Future.delayed(Duration(microseconds: 100 + _probeRng.nextInt(900)));
+
+    tls = await SecureSocket.secure(
+      raw,
+      host: sni,
+      onBadCertificate: acceptCdnCert,
+    ).timeout(Duration(milliseconds: budgetMs ~/ 2));
+
+    tls.write(
+      'GET /cdn-cgi/trace HTTP/1.1\r\n'
+      'Host: $sni\r\n'
+      'User-Agent: senpaiscanner/1.0\r\n'
+      'Connection: close\r\n\r\n',
+    );
+
+    final buf       = StringBuffer();
+    final completer = Completer<void>();
+    sub = tls.listen(
+      (chunk) {
+        buf.write(utf8.decode(chunk, allowMalformed: true));
+        if (buf.length > 2048 && !completer.isCompleted) completer.complete();
+      },
+      onDone:        () { if (!completer.isCompleted) completer.complete(); },
+      onError:       (_) { if (!completer.isCompleted) completer.complete(); },
+      cancelOnError: true,
+    );
+
+    await completer.future
+        .timeout(Duration(milliseconds: budgetMs ~/ 4))
+        .catchError((_) {});
+    await sub.cancel();
+
+    final latencyMs  = sw.elapsedMicroseconds / 1000.0;
+    final response   = buf.toString();
+    final httpStatus = _cfParseHttpStatus(response);
+    final colo       = _cfParseColo(response);
+
+    if (colo.isNotEmpty || httpStatus > 0) {
+      return (
+        latencyMs: latencyMs,
+        result: CfHttpResult(tlsOk: true, httpStatus: httpStatus, colo: colo),
+      );
+    }
+    return (latencyMs: 0, result: const CfHttpResult(tlsOk: false, httpStatus: -1, colo: ''));
+  } catch (_) {
+    return (latencyMs: 0, result: const CfHttpResult(tlsOk: false, httpStatus: -1, colo: ''));
+  } finally {
+    try { await sub?.cancel(); } catch (_) {}
+    try { tls?.destroy();      } catch (_) {}
+    try { raw?.destroy();      } catch (_) {}
+  }
+}
+
+/// Multi-try HTTP probe — SENPAI-SYNC
+/// Mirrors SenPai Probe() with cfg.Tries=4 and per-try jitter between attempts.
+/// Returns CfMultiProbeResult with full loss/latency stats.
+Future<CfMultiProbeResult> cfHttpProbeMulti(
+  String ip, {
+  String sni        = '',
+  int    tries      = 4,   // SenPai default = 4
+  int    budgetMs   = 5000, // SenPai default = 5s
+}) async {
+  final effectiveSni = sni.isNotEmpty ? sni : 'speed.cloudflare.com';
+  final latencies    = List<double>.filled(tries, 0);
+  bool   tlsOk      = false;
+  int    httpStatus  = -1;
+  String colo        = '';
+
+  for (int i = 0; i < tries; i++) {
+    final r = await _cfHttpProbeSingle(ip, sni: effectiveSni, budgetMs: budgetMs);
+    latencies[i] = r.latencyMs; // 0 = failed (mirrors SenPai Latencies[i]=0)
+    if (r.result.tlsOk)    tlsOk      = true;
+    if (r.result.httpStatus > 0) httpStatus = r.result.httpStatus;
+    if (r.result.colo.isNotEmpty) colo = r.result.colo;
+
+    // Small jitter between tries — mirrors SenPai prober.go inter-try sleep
+    if (i < tries - 1) {
+      final jitterMs = 10 + _probeRng.nextInt(50);
+      await Future.delayed(Duration(milliseconds: jitterMs));
+    }
+  }
+
+  return _buildMultiResult(
+    latencies:  latencies,
+    tlsOk:      tlsOk,
+    httpStatus: httpStatus,
+    colo:       colo,
+  );
+}
+
+/// Legacy single-result wrapper (backward compat for old callers)
 Future<CfHttpResult> cfHttpProbe(
   String ip, {
   String sni        = '',
   int totalBudgetMs = 8000,
 }) async {
-  final effectiveSni = sni.isNotEmpty ? sni : 'speed.cloudflare.com';
+  final r = await cfHttpProbeMulti(ip, sni: sni, tries: 1, budgetMs: totalBudgetMs);
+  return CfHttpResult(tlsOk: r.tlsOk, httpStatus: r.httpStatus, colo: r.colo);
+}
 
-  const tries = 3; // 3 tries like SenPai default
-  for (int attempt = 0; attempt < tries; attempt++) {
-    Socket?             raw;
-    SecureSocket?       tls;
-    StreamSubscription? sub;
-    try {
-      raw = await Socket.connect(
-        ip, 443,
-        timeout: Duration(milliseconds: totalBudgetMs ~/ 4),
-      );
+// ── Stats helpers — mirrors SenPai result.go ─────────────────────────────────
 
-      await Future.delayed(Duration(microseconds: 100 + _probeRng.nextInt(900)));
+CfMultiProbeResult _buildMultiResult({
+  required List<double> latencies,
+  required bool   tlsOk,
+  required int    httpStatus,
+  required String colo,
+}) {
+  final successful = latencies.where((l) => l > 0).toList();
+  final failed     = latencies.where((l) => l == 0).length;
+  final total      = latencies.length;
 
-      tls = await SecureSocket.secure(
-        raw,
-        host: effectiveSni,
-        onBadCertificate: acceptCdnCert,
-      ).timeout(Duration(milliseconds: totalBudgetMs ~/ 2));
+  final lossPercent = total > 0 ? (failed / total) * 100.0 : 100.0;
 
-      tls.write(
-        'GET /cdn-cgi/trace HTTP/1.1\r\n'
-        'Host: $effectiveSni\r\n'
-        'User-Agent: MidONe/1.0\r\n'
-        'Connection: close\r\n\r\n',
-      );
+  double avgMs    = 0;
+  double minMs    = 0;
+  double maxMs    = 0;
+  double jitterMs = 0;
 
-      final buf       = StringBuffer();
-      final completer = Completer<void>();
-      sub = tls.listen(
-        (chunk) {
-          buf.write(utf8.decode(chunk, allowMalformed: true));
-          if (buf.length > 2048 && !completer.isCompleted) completer.complete();
-        },
-        onDone:        () { if (!completer.isCompleted) completer.complete(); },
-        onError:       (_) { if (!completer.isCompleted) completer.complete(); },
-        cancelOnError: true,
-      );
+  if (successful.isNotEmpty) {
+    avgMs = successful.reduce((a, b) => a + b) / successful.length;
+    minMs = successful.reduce((a, b) => a < b ? a : b);
+    maxMs = successful.reduce((a, b) => a > b ? a : b);
 
-      await completer.future
-          .timeout(Duration(milliseconds: totalBudgetMs ~/ 4))
-          .catchError((_) {});
-
-      await sub.cancel();
-
-      final response   = buf.toString();
-      final httpStatus = _cfParseHttpStatus(response);
-      final colo       = _cfParseColo(response);
-
-      if (colo.isNotEmpty || httpStatus > 0) {
-        return CfHttpResult(tlsOk: true, httpStatus: httpStatus, colo: colo);
-      }
-    } catch (_) {
-      // fall through to retry
-    } finally {
-      try { await sub?.cancel(); } catch (_) {}
-      try { tls?.destroy();      } catch (_) {}
-      try { raw?.destroy();      } catch (_) {}
-    }
-
-    if (attempt < tries - 1) {
-      await Future.delayed(Duration(milliseconds: 10 + _probeRng.nextInt(50)));
+    if (successful.length >= 2) {
+      final variance = successful
+          .map((l) => (l - avgMs) * (l - avgMs))
+          .reduce((a, b) => a + b) / successful.length;
+      jitterMs = sqrt(variance);
     }
   }
 
-  return const CfHttpResult(tlsOk: false, httpStatus: -1, colo: '');
+  return CfMultiProbeResult(
+    tlsOk:        tlsOk,
+    httpStatus:   httpStatus,
+    colo:         colo,
+    latencies:    latencies,
+    avgMs:        avgMs,
+    minMs:        minMs,
+    maxMs:        maxMs,
+    jitterMs:     jitterMs,
+    lossPercent:  lossPercent,
+  );
 }
 
 int _cfParseHttpStatus(String response) {
@@ -494,13 +624,13 @@ Future<bool> cfWsProbe(
       cancelOnError: true,
     );
 
-    // Phase 1: idle hold 2s
+    // Phase 1: idle hold 2s — mirrors SenPai probeWebSocket Phase 1
     final phase1 = await dataCompleter.future
         .timeout(const Duration(seconds: 2), onTimeout: () => 'timeout');
 
     if (connDead || phase1 == null) return false;
 
-    // Phase 2: WebSocket upgrade with random key
+    // Phase 2: WebSocket upgrade with random key — mirrors SenPai Phase 2
     final wsRequest =
         'GET $path HTTP/1.1\r\n'
         'Host: $host\r\n'
