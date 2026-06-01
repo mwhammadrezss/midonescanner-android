@@ -228,10 +228,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   XrayConfig? _cfParsedConfig;
 
   // Scan options
-  int _cfSampleCount = 1000;          // random IPs from CF ranges
-  int _cfConcurrency = 10;            // parallel probes
-  int _cfTimeoutMs   = 8000;          // per-probe timeout (ms)
-  int _cfTopN        = 20;            // top-N phase-1 results for phase-2
+  int _cfSampleCount = 500;           // random IPs from CF ranges (SenPai default)
+  int _cfConcurrency = 50;            // parallel probes (SenPai default)
+  int _cfTimeoutMs   = 5000;          // per-probe timeout ms (SenPai default)
+  int _cfTopN        = 10;            // top-N phase-1 results for phase-2 (SenPai default)
+  int _cfTries        = 4;             // tries per IP (SenPai default)
+  CfSortMode _cfSortMode = CfSortMode.avg; // sort mode (SenPai default)
   String? _cfCidrFilter;              // null = all CF ranges
 
   // IP source mode: 0 = random from CF ranges, 1 = manual IPs from text field
@@ -257,11 +259,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _cfXrayChecked = false;
   // Sample count presets
   static const _cfCountPresets = [100, 500, 1000, 5000, 20000, 50000, 100000];
-  int _cfCountPresetIdx = 2; // default: 1000
+  int _cfCountPresetIdx = 1; // default: 500 (SenPai default)
   // Timeout presets (ms)
   static const _cfTimeoutPresets = [3000, 5000, 8000, 12000];
   static const _cfTimeoutLabels = ['3s', '5s', '8s', '12s'];
-  int _cfTimeoutPresetIdx = 2; // default: 8s
+  int _cfTimeoutPresetIdx = 1; // default: 5s (SenPai default)
 
   // ── DNS tab state ─────────────────────────────────────────────────────────
   final _dnsScanner = DNSScanner();
@@ -1681,6 +1683,57 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           const SizedBox(height: 14),
 
+          // ── Tries per IP picker (SENPAI-SYNC) ───────────────────────────
+          Text('TRIES PER IP',
+              style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 1.2)),
+          const SizedBox(height: 6),
+          Row(
+            children: [1, 2, 4, 6].map((t) {
+              final sel = _cfTries == t;
+              return Expanded(
+                child: Padding(
+                  padding: EdgeInsets.only(right: t != 6 ? 6 : 0),
+                  child: GestureDetector(
+                    onTap: () => setState(() => _cfTries = t),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      decoration: BoxDecoration(
+                        color: sel ? accentLime : card2Color,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: sel ? accentLime : borderColor),
+                      ),
+                      child: Text('×$t',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.inter(
+                              color: sel ? bgColor : textPrimary,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13)),
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 14),
+
+          // ── Sort mode picker (SENPAI-SYNC) ───────────────────────────────
+          Text('SORT BY',
+              style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 1.2)),
+          const SizedBox(height: 6),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _cfSortBtn(CfSortMode.avg,    '⚡ Latency'),
+                _cfSortBtn(CfSortMode.loss,   '📉 Loss %'),
+                _cfSortBtn(CfSortMode.jitter, '〰 Jitter'),
+                _cfSortBtn(CfSortMode.colo,   '🌍 Colo'),
+                _cfSortBtn(CfSortMode.speed,  '🚀 Speed'),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
           // ── Validation Mode toggle ───────────────────────────────────────
           Text('VALIDATION MODE',
               style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 1.2)),
@@ -2123,6 +2176,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         timeoutMs: _cfTimeoutMs,
         config: config,
         topN: _cfTopN,
+        tries: _cfTries,
+        sortMode: _cfSortMode,
         cidrFilter: null,
         validationMode: _cfValidationMode == 1 ? CfValidationMode.xrayBinary : CfValidationMode.wsProbe,
         isCancelled: () => _cfCancelled,
@@ -2173,6 +2228,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _stopCfScan() {
     setState(() { _cfCancelled = true; _cfScanning = false; });
+  }
+
+  // ── Sort button helper (SENPAI-SYNC) ───────────────────────────────────────
+  Widget _cfSortBtn(CfSortMode mode, String label) {
+    final sel = _cfSortMode == mode;
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: GestureDetector(
+        onTap: () => setState(() => _cfSortMode = mode),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            color: sel ? const Color(0xFF00E5FF) : card2Color,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: sel ? const Color(0xFF00E5FF) : borderColor),
+          ),
+          child: Text(label,
+              style: GoogleFonts.inter(
+                  color: sel ? bgColor : textPrimary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12)),
+        ),
+      ),
+    );
   }
 
   // ── Phase 1 result card ────────────────────────────────────────────────────
