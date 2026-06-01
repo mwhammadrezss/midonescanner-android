@@ -347,6 +347,12 @@ Future<List<int>?> _readBytes(Socket sock, int count, Duration timeout) async {
 
 // SOCKS5 CONNECT tunnel to cp.cloudflare.com:443, then TLS, then GET /cdn-cgi/trace
 // Verify body contains "colo=" — proves real traffic flowed through xray
+//
+// FIX: Do NOT use _readBytes() here — it calls sock.listen() internally which
+// marks the stream as "already listened to", causing SecureSocket.secure() to
+// throw "Bad state: Stream has already been listened to".
+// Instead: use a single StreamController to buffer all incoming bytes,
+// then read from that buffer synchronously after SecureSocket.secure().
 Future<_ConnResult> _socks5ConnectivityCheck(int socksPort, {required Duration timeout}) async {
   Socket? sock;
   SecureSocket? tls;
@@ -356,41 +362,69 @@ Future<_ConnResult> _socks5ConnectivityCheck(int socksPort, {required Duration t
     sock = await Socket.connect('127.0.0.1', socksPort,
         timeout: const Duration(seconds: 5));
 
+    // Buffer all bytes from sock into a list — ONE listener only
+    final rxBuf = <int>[];
+    final rxCompleter = Completer<void>();
+    sock.listen(
+      (data) {
+        rxBuf.addAll(data);
+        if (!rxCompleter.isCompleted) rxCompleter.complete();
+      },
+      onDone: () { if (!rxCompleter.isCompleted) rxCompleter.complete(); },
+      onError: (_) { if (!rxCompleter.isCompleted) rxCompleter.complete(); },
+      cancelOnError: false,
+    );
+
+    // Helper: wait until rxBuf has at least [n] bytes
+    Future<bool> waitBytes(int n, Duration tout) async {
+      final deadline = DateTime.now().add(tout);
+      while (rxBuf.length < n) {
+        if (DateTime.now().isAfter(deadline)) return false;
+        await Future.delayed(const Duration(milliseconds: 20));
+      }
+      return true;
+    }
+
     // 2. SOCKS5 greeting: VER=5, NMETHODS=1, METHOD=0 (no auth)
     sock.add([0x05, 0x01, 0x00]);
     await sock.flush();
 
-    // 3. Read server method selection
-    final greet = await _readBytes(sock, 2, const Duration(seconds: 3));
-    if (greet == null || greet[0] != 0x05 || greet[1] != 0x00) {
+    // 3. Read 2-byte server method selection
+    if (!await waitBytes(2, const Duration(seconds: 3))) {
+      return const _ConnResult(success: false, error: 'SOCKS5 greeting timeout');
+    }
+    if (rxBuf[0] != 0x05 || rxBuf[1] != 0x00) {
       return const _ConnResult(success: false, error: 'SOCKS5 auth failed');
     }
+    rxBuf.removeRange(0, 2);
 
     // 4. SOCKS5 CONNECT to cp.cloudflare.com:443
     const host = 'cp.cloudflare.com';
     const port = 443;
     final hostBytes = utf8.encode(host);
-    final connectReq = <int>[
-      0x05, 0x01, 0x00,
-      0x03,
-      hostBytes.length,
-      ...hostBytes,
-      (port >> 8) & 0xFF,
-      port & 0xFF,
-    ];
-    sock.add(connectReq);
+    sock.add([
+      0x05, 0x01, 0x00, 0x03,
+      hostBytes.length, ...hostBytes,
+      (port >> 8) & 0xFF, port & 0xFF,
+    ]);
     await sock.flush();
 
-    // 5. Read CONNECT response (at least 4 bytes: VER REP RSV ATYP)
-    final connResp = await _readBytes(sock, 4, const Duration(seconds: 5));
-    if (connResp == null || connResp[0] != 0x05 || connResp[1] != 0x00) {
-      final code = connResp != null ? connResp[1] : -1;
+    // 5. Read 4-byte CONNECT response header
+    if (!await waitBytes(4, const Duration(seconds: 5))) {
+      return const _ConnResult(success: false, error: 'SOCKS5 CONNECT timeout');
+    }
+    if (rxBuf[0] != 0x05 || rxBuf[1] != 0x00) {
+      final code = rxBuf[1];
       return _ConnResult(success: false, error: 'SOCKS5 CONNECT failed (code $code)');
     }
-    // Drain remainder of CONNECT response (bound address)
-    await Future.delayed(const Duration(milliseconds: 50));
+    // Drain the full CONNECT response (bound addr varies by ATYP)
+    // Wait a bit for remaining bytes then clear buffer
+    await Future.delayed(const Duration(milliseconds: 80));
+    rxBuf.clear();
 
-    // 6. TLS upgrade over the SOCKS5 tunnel
+    // 6. TLS upgrade — sock stream is NOT re-listened here;
+    //    SecureSocket.secure() takes ownership of the raw socket connection
+    //    (the existing listener above will stop receiving after handoff).
     tls = await SecureSocket.secure(
       sock,
       host: host,
