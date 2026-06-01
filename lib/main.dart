@@ -30,6 +30,7 @@ import 'engine/isolate_scan_engine.dart';
 import 'engine/cf_ip_ranges.dart';
 import 'engine/cf_xray_scan_engine.dart';
 import 'xray/xray_validator.dart' show findXrayBinary;
+import 'xray/xray_android_bootstrap.dart';
 import 'xray/config_parser.dart';
 
 // ─── Notifications ──────────────────────────────────────────────────────────
@@ -132,7 +133,11 @@ void main() async {
     );
   };
 
-  if (Platform.isAndroid) await initNotifications();
+  if (Platform.isAndroid) {
+    await initNotifications();
+    // Pre-extract xray binary from assets for CF Phase-2 (Mode B) scanning
+    XrayAndroidBootstrap.init(); // fire-and-forget, non-blocking
+  }
   GeoIPOffline().load();
   runApp(const MidOneScannerApp());
 }
