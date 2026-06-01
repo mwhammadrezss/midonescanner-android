@@ -6,7 +6,6 @@
 // Live update: fetches fresh ranges from Cloudflare on demand.
 
 import 'dart:math';
-import 'dart:io';
 import 'dart:async';
 
 // ─── Built-in Cloudflare IPv4 ranges ─────────────────────────────────────────
@@ -27,18 +26,6 @@ const kCfRangesV4 = [
   '172.64.0.0/13',
   '131.0.72.0/22',
 ];
-
-// ─── Built-in Cloudflare IPv6 ranges ─────────────────────────────────────────
-const kCfRangesV6 = [
-  '2400:cb00::/32',
-  '2606:4700::/32',
-  '2803:f800::/32',
-  '2405:b500::/32',
-  '2405:8100::/32',
-  '2a06:98c0::/29',
-  '2c0f:f248::/32',
-];
-
 /// Total IPv4 address count across all CF ranges.
 int get cfTotalV4IpCount {
   int total = 0;
@@ -102,37 +89,6 @@ List<String> sampleCfIps({
 
   return result;
 }
-
-/// Fetches the latest Cloudflare IP ranges from cloudflare.com.
-/// Returns the updated v4 and v6 lists, or throws on network error.
-Future<({List<String> v4, List<String> v6})> fetchLatestCfRanges({
-  Duration timeout = const Duration(seconds: 10),
-}) async {
-  Future<List<String>> fetch(String url) async {
-    final client = HttpClient();
-    client.connectionTimeout = timeout;
-    try {
-      final req = await client.getUrl(Uri.parse(url));
-      final resp = await req.close();
-      if (resp.statusCode != 200) {
-        throw HttpException('HTTP ${resp.statusCode}', uri: Uri.parse(url));
-      }
-      final body = await resp.transform(const SystemEncoding().decoder).join();
-      return body
-          .split('\n')
-          .map((l) => l.trim())
-          .where((l) => l.isNotEmpty && !l.startsWith('#'))
-          .toList();
-    } finally {
-      client.close();
-    }
-  }
-
-  final v4 = await fetch('https://www.cloudflare.com/ips-v4/');
-  final v6 = await fetch('https://www.cloudflare.com/ips-v6/');
-  return (v4: v4, v6: v6);
-}
-
 // ─── Internal CIDR range model ────────────────────────────────────────────────
 
 class _CidrRange {
