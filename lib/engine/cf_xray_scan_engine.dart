@@ -273,10 +273,11 @@ Future<List<CfPhase2Result>> runCfXrayScanner({
       : sampleCfIps(count: sampleCount, cidrFilter: cidrFilter);
 
   // ── Derive WS probe settings from config ──────────────────────────────────
-  final bool requireWs = config != null &&
-      (config.network == 'ws' ||
-       config.network == 'xhttp' ||
-       config.network == 'splithttp');
+  // requireWs = true ONLY for actual WebSocket transport.
+  // XHTTP / splithttp use HTTP streaming — NOT WebSocket protocol.
+  // Sending a WS upgrade to an XHTTP endpoint always returns non-101 → WS FAIL.
+  // For XHTTP, HTTP 200 + CF edge is sufficient — no WS probe needed.
+  final bool requireWs = config != null && config.network == 'ws';
 
   final String wsSni  = (config != null && config.effectiveSni.isNotEmpty)
       ? config.effectiveSni : 'speed.cloudflare.com';
@@ -314,6 +315,7 @@ Future<List<CfPhase2Result>> runCfXrayScanner({
       bool? wsOk;
       if (multi.isCloudflareEdge) {
         if (requireWs) {
+          // WS transport: do WebSocket upgrade probe
           wsOk = await cfWsProbe(
             ip,
             sni:          wsSni,
@@ -322,8 +324,11 @@ Future<List<CfPhase2Result>> runCfXrayScanner({
             totalBudgetMs: timeoutMs,
           );
         } else if (config != null) {
-          wsOk = null; // TCP/gRPC: CF edge sufficient
+          // XHTTP / gRPC / TCP / splithttp: HTTP edge check is sufficient
+          // No WS upgrade probe — it would always fail on non-WS endpoints
+          wsOk = null;
         } else {
+          // No config: default WS probe to speed.cloudflare.com
           wsOk = await cfWsProbe(ip, totalBudgetMs: timeoutMs);
         }
       }
