@@ -434,9 +434,9 @@ Future<({double latencyMs, CfHttpResult result})> _cfHttpProbeSingle(
         result: CfHttpResult(tlsOk: true, httpStatus: httpStatus, colo: colo),
       );
     }
-    return (latencyMs: 0, result: const CfHttpResult(tlsOk: false, httpStatus: -1, colo: ''));
+    return (latencyMs: 0.0, result: const CfHttpResult(tlsOk: false, httpStatus: -1, colo: ''));
   } catch (_) {
-    return (latencyMs: 0, result: const CfHttpResult(tlsOk: false, httpStatus: -1, colo: ''));
+    return (latencyMs: 0.0, result: const CfHttpResult(tlsOk: false, httpStatus: -1, colo: ''));
   } finally {
     try { await sub?.cancel(); } catch (_) {}
     try { tls?.destroy();      } catch (_) {}
