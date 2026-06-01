@@ -611,7 +611,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _prefiltering   = false;
       _displayDirty   = true;
       _cachedDisplay  = [];
-      _advancedFilter = 'all';
+      _advancedFilter = 'alive';
       _coloFilter     = '';
       _statusText = 'Fast scan: ${ips.length} IPs\u2026';
     });
@@ -1924,7 +1924,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ],
             ),
             const SizedBox(height: 8),
-            ..._cfPhase1Results.map((r) => _cfPhase1ResultCard(r)),
+            ..._cfPhase1Results.where((r) => r.isEdge).map((r) => _cfPhase1ResultCard(r)),
           ],
 
           // ── Legacy cfResults (backward compat) ───────────────────────────
@@ -2064,8 +2064,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           final edgeCount = _cfPhase1Results.where((r) => r.isEdge).length;
           final xrayCount = _cfPhase2Results.where((r) => r.success).length;
           _cfStatus = config != null
-              ? 'Done! \$xrayCount Config OK / \$edgeCount CF edge'
-              : 'Done! \$edgeCount CF edge IPs found';
+              ? 'Done! $xrayCount Config OK / $edgeCount CF edge'
+              : 'Done! $edgeCount CF edge IPs found';
         });
       }
     } catch (e) {
@@ -3654,7 +3654,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           Text('ETA ${_calcEta()}',
                               style: GoogleFonts.inter(color: textSecond, fontSize: 10)),
                         const SizedBox(width: 6),
-                        Text('\$_done / \$_total',
+                        Text('$_done / $_total',
                             style: GoogleFonts.inter(color: textPrimary, fontSize: 12, fontWeight: FontWeight.w700)),
                       ],
                     ],
@@ -3674,12 +3674,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     const SizedBox(height: 6),
                     Row(
                       children: [
-                        _chip(Icons.check_circle_outline_rounded, '\$_okCount alive', accentLime),
+                        _chip(Icons.check_circle_outline_rounded, '$_okCount alive', accentLime),
                         const SizedBox(width: 6),
-                        _chip(Icons.cancel_outlined, '\$_failCount dead', const Color(0xFFFF5252)),
+                        _chip(Icons.cancel_outlined, '$_failCount dead', const Color(0xFFFF5252)),
                         if (_thrCount > 0) ...[
                           const SizedBox(width: 6),
-                          _chip(Icons.speed_rounded, '\$_thrCount throttled', const Color(0xFFFFAB40)),
+                          _chip(Icons.speed_rounded, '$_thrCount throttled', const Color(0xFFFFAB40)),
                         ],
                       ],
                     ),
@@ -3859,8 +3859,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
       if (result == null || result.files.isEmpty) return;
       final bytes = result.files.first.bytes;
-      if (bytes == null) return;
-      final text = String.fromCharCodes(bytes);
+      final String text;
+      if (bytes != null) {
+        text = String.fromCharCodes(bytes);
+      } else {
+        final filePath = result.files.first.path;
+        if (filePath == null) {
+          _showSnack('\u274c فایل قابل خواندن نیست.');
+          return;
+        }
+        text = await File(filePath).readAsString();
+      }
       final ips = text
           .split(RegExp(r'[\r\n,;\s]+'))
           .map((s) => s.trim())
