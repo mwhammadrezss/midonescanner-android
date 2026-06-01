@@ -32,9 +32,6 @@ enum ScanMode { normal, deep }
 const _survivalNormal = 12000;
 const _survivalDeep   = 15000;
 
-// Module-level cancellation passthrough
-bool Function()? _currentIsCancelled;
-
 // ─── scanOneIp ───────────────────────────────────────────────────────────────
 Future<ScanResult> scanOneIp(
   String ip, {
@@ -44,7 +41,6 @@ Future<ScanResult> scanOneIp(
   String? normalSniOverride,
   bool isCfScan        = false,
 }) async {
-  _currentIsCancelled = isCancelled;
   final (country, flag) = GeoIPOffline().lookupFull(ip);
   final survivalTarget  = mode == ScanMode.deep ? _survivalDeep : _survivalNormal;
   final repeats         = mode == ScanMode.deep ? 3 : 2;
@@ -87,6 +83,7 @@ Future<ScanResult> scanOneIp(
       country: country, flag: flag, dead: dead,
       subnetTimeoutHint: subnetTimeout,
       runCfProbe: isCfScan,
+      isCancelled: isCancelled,
     );
     if (result.isAlive) {
       SubnetMemoryCache().recordSuccess(ip, result.latencyMs, result.sniUsed ?? sniToUse);
@@ -116,6 +113,7 @@ Future<ScanResult> scanOneIp(
       country: country, flag: flag, dead: dead,
       subnetTimeoutHint: subnetTimeout,
       runCfProbe: kSniCloudflareFamily.contains(sni) || isCfScan,
+      isCancelled: isCancelled,
     );
 
     if (candidate.tier != IpTier.dead && candidate.tier != IpTier.weak) {
@@ -157,6 +155,7 @@ Future<ScanResult> _scanWithSni(
   required ScanResult Function(ScanPhase) dead,
   int? subnetTimeoutHint,
   bool runCfProbe = false,
+  bool Function()? isCancelled,
 }) async {
   StructuredLogger().log(phase: 'probe_start', ip: ip, sni: sni);
 
@@ -219,7 +218,7 @@ Future<ScanResult> _scanWithSni(
   if (samples.isEmpty) return dead(ScanPhase.stabilityFail);
 
   final lossPercent = repeats > 1
-      ? ((failed / (repeats - 1)) * 100).round().clamp(0, 100)
+      ? ((failed / repeats) * 100).round().clamp(0, 100)
       : 0;
   final reliability = samples.length / repeats;
   final avg         = samples.reduce((a, b) => a + b) / samples.length;
@@ -229,7 +228,7 @@ Future<ScanResult> _scanWithSni(
     ip,
     sni: effectiveSni,
     survivalTargetMs: survivalTarget,
-    isCancelled: _currentIsCancelled,
+    isCancelled: isCancelled,
   );
 
   final phase = survival.dpiKilled
@@ -342,8 +341,6 @@ Future<List<ScanResult>> runScanningEngine(
   final results     = <ScanResult>[];
   int   done        = 0;
   final cancelCheck = isCancelled ?? () => false;
-
-  _currentIsCancelled = cancelCheck;
 
   AdaptiveConcurrencyController().reset();
 
