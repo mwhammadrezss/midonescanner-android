@@ -29,8 +29,8 @@ const shiroSni = kShiroSni;
 enum ScanMode { normal, deep }
 
 // Survival targets
-const _survivalNormal = 20000;
-const _survivalDeep   = 20000;
+const _survivalNormal = 12000;
+const _survivalDeep   = 15000;
 
 // Module-level cancellation passthrough
 bool Function()? _currentIsCancelled;
@@ -47,7 +47,7 @@ Future<ScanResult> scanOneIp(
   _currentIsCancelled = isCancelled;
   final (country, flag) = GeoIPOffline().lookupFull(ip);
   final survivalTarget  = mode == ScanMode.deep ? _survivalDeep : _survivalNormal;
-  final repeats         = mode == ScanMode.deep ? 5 : 3;
+  final repeats         = mode == ScanMode.deep ? 3 : 2;
 
   final subnetBestSni = SubnetMemoryCache().bestSniForSubnet(ip);
 
@@ -106,6 +106,7 @@ Future<ScanResult> scanOneIp(
   bool cloudflareFamilyPassed = false;
 
   for (final sni in orderedSnis) {
+    if (isCancelled?.call() == true) break;
     if (googleFamilyPassed && kSniGoogleFamily.contains(sni)) continue;
     if (cloudflareFamilyPassed && kSniCloudflareFamily.contains(sni)) continue;
 
@@ -159,7 +160,7 @@ Future<ScanResult> _scanWithSni(
 }) async {
   StructuredLogger().log(phase: 'probe_start', ip: ip, sni: sni);
 
-  final first = await probeWithRetry(ip, sni: sni, retries: 5, sniRotation: runCfProbe);
+  final first = await probeWithRetry(ip, sni: sni, retries: 3, sniRotation: runCfProbe);
   if (first == null) {
     StructuredLogger()
         .log(phase: 'probe_fail', ip: ip, sni: sni, error: 'TLS fail');

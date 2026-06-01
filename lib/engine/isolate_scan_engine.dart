@@ -172,15 +172,20 @@ Future<void> _workerMain(_WorkerConfig config) async {
   final scanSem = Semaphore(config.concurrency);
   final total = liveIps.length;
 
+  bool _localCancelled = false;
+
   await Future.wait(liveIps.map((ip) async {
+    if (_localCancelled) return;
     await scanSem.acquire();
     try {
+      if (_localCancelled) return;
       final r = await scanOneIp(
         ip,
         mode: config.mode,
         snis: config.deepSnis,
         normalSniOverride: config.normalSniOverride,
         isCfScan: config.isCfScan,
+        isCancelled: () => _localCancelled,
       );
       results.add(r);
       done++;

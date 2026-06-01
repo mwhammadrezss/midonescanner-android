@@ -513,7 +513,7 @@ Future<List<ScanResult>> runDeepScanEngine(
   if (winners.isEmpty || cancelCheck()) return results;
 
   // ── STAGES 3–7: Elite verification ───────────────────────────────────────
-  const int _eliteConcurrency = 4;
+  const int _eliteConcurrency = 8;
   final eliteSem = Semaphore(_eliteConcurrency);
   // progress: track how many of the liveIps total we have "processed"
   // Stage 1 already tested all liveIps; elite stage processes winners subset.
@@ -540,18 +540,18 @@ Future<List<ScanResult>> runDeepScanEngine(
       final survival = await tunnelSurvivalTest(
         w.ip,
         sni:              bestSni,
-        survivalTargetMs: 25000,
+        survivalTargetMs: 15000,
         isCancelled:      cancelCheck,
       );
       if (cancelCheck()) return;
 
-      // ── STAGE 4: HTTP/2 ALPN check ────────────────────────────────────────
-      final h2 = await _checkH2Alpn(w.ip, bestSni);
+      // ── STAGE 4: HTTP/2 ALPN check ─ (8s max) ───────────────────────────────
+      final h2 = await _checkH2Alpn(w.ip, bestSni).timeout(const Duration(seconds: 8), onTimeout: () => false);
       if (cancelCheck()) return;
 
       // ── STAGE 5: Bandwidth test (4s window) ───────────────────────────────
       final bandwidth = await measureBandwidthKBs(
-          w.ip, sni: bestSni, testDurationMs: 4000);
+          w.ip, sni: bestSni, testDurationMs: 4000).timeout(const Duration(seconds: 8), onTimeout: () => null);
       if (cancelCheck()) return;
 
       // ── STAGE 6: Connection reuse (3 consecutive sessions) ────────────────

@@ -149,7 +149,7 @@ Future<({double latencyMs, int retransmits, ProbeTimings? timings, String sniUse
     // UPGRADED: watchdog ensures hung sockets are killed within 16s
     final r = await withWatchdog(
       fn: () => androidTlsProbe(ip, sni: effectiveSni),
-      timeout: const Duration(seconds: 16),
+      timeout: const Duration(seconds: 10),
       fallback: null,
     );
     if (r != null) {
@@ -163,7 +163,7 @@ Future<({double latencyMs, int retransmits, ProbeTimings? timings, String sniUse
     if (i < retries - 1) {
       final baseMs   = (300 * pow(2, i)).toInt();
       final jitterMs = _probeRng.nextInt(200);
-      final delayMs  = (baseMs + jitterMs).clamp(300, 3000);
+      final delayMs  = (baseMs + jitterMs).clamp(200, 2000);
       await Future.delayed(Duration(milliseconds: delayMs));
     }
   }
