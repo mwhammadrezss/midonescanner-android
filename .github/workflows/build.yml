@@ -69,6 +69,14 @@ jobs:
             ls -la xray_android_tmp/
             exit 1
           fi
+          # Bundle geoip.dat and geosite.dat (required by xray at runtime)
+          GEOIP_URL="https://github.com/XTLS/Xray-core/releases/latest/download/geoip.dat"
+          GEOSITE_URL="https://github.com/XTLS/Xray-core/releases/latest/download/geosite.dat"
+          wget -q -O assets/xray/geoip.dat "$GEOIP_URL" || curl -sL -o assets/xray/geoip.dat "$GEOIP_URL"
+          wget -q -O assets/xray/geosite.dat "$GEOSITE_URL" || curl -sL -o assets/xray/geosite.dat "$GEOSITE_URL"
+          GIP_SIZE=$(du -sh assets/xray/geoip.dat | cut -f1)
+          GST_SIZE=$(du -sh assets/xray/geosite.dat | cut -f1)
+          echo "✅ geoip.dat bundled ($GIP_SIZE) | geosite.dat bundled ($GST_SIZE)"
           rm -rf xray-android.zip xray_android_tmp
 
       - name: 🔨 Build APK
