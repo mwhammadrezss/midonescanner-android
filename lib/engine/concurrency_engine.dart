@@ -1,12 +1,6 @@
 // lib/engine/concurrency_engine.dart
 import 'dart:async';
 
-int calcConcurrency(int totalIps) {
-  if (totalIps < 100)  return 8;
-  if (totalIps < 1000) return 16;
-  return 24;
-}
-
 class Semaphore {
   int _count;
   final _waiters = <Completer<void>>[];
