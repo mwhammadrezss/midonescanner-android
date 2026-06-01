@@ -139,7 +139,7 @@ Future<({double latencyMs, int retransmits, ProbeTimings? timings})?> androidTls
 Future<({double latencyMs, int retransmits, ProbeTimings? timings, String sniUsed})?> probeWithRetry(
   String ip, {
   String sni         = kShiroSni,
-  int    retries     = 5,
+  int    retries     = 3,
   bool   sniRotation = false,
 }) async {
   for (int i = 0; i < retries; i++) {

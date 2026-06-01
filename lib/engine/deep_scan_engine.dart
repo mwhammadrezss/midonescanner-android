@@ -216,7 +216,7 @@ Future<double> _testConnectionReuse(
   final latencies = <double>[];
   for (int i = 0; i < 3; i++) {
     if (isCancelled()) break;
-    final result = await androidTlsProbe(ip, sni: sni);
+    final result = await androidTlsProbe(ip, sni: sni, timeoutMs: 3000);
     if (result != null) latencies.add(result.latencyMs);
     if (i < 2) await Future.delayed(const Duration(milliseconds: 300));
   }

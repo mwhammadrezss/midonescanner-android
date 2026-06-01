@@ -58,6 +58,8 @@ class WorkerPool {
       final c = Completer<void>();
       _waiters.add(c);
       await c.future;
+      // Re-check disposed after waking — dispose() may have woken us
+      if (_disposed) return;
     }
     _active++;
   }

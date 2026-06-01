@@ -534,7 +534,8 @@ Future<double> _downloadViaSocks5({
     int received = 0;
     bool headersDone = false;
     final completer = Completer<void>();
-    stream.listen(
+    StreamSubscription<List<int>>? dlSub;
+    dlSub = stream.listen(
       (chunk) {
         if (!headersDone) {
           final s = utf8.decode(chunk, allowMalformed: true);
@@ -553,6 +554,7 @@ Future<double> _downloadViaSocks5({
       cancelOnError: true,
     );
     await completer.future.timeout(timeout).catchError((_) {});
+    await dlSub.cancel();
 
     final elapsed = DateTime.now().difference(start).inMicroseconds / 1e6;
     if (received < 4096 || elapsed <= 0) return 0.0;
