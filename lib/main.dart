@@ -30,8 +30,6 @@ import 'dns_scanner/dns_servers.dart';
 import 'engine/isolate_scan_engine.dart';
 import 'engine/cf_ip_ranges.dart';
 import 'engine/cf_xray_scan_engine.dart';
-import 'xray/xray_validator.dart' show findXrayBinary;
-import 'xray/xray_android_bootstrap.dart';
 import 'xray/config_parser.dart';
 
 // ─── Notifications ──────────────────────────────────────────────────────────
@@ -136,8 +134,6 @@ void main() async {
 
   if (Platform.isAndroid) {
     await initNotifications();
-    // Pre-extract xray binary from assets for CF Phase-2 (Mode B) scanning
-    XrayAndroidBootstrap.init(); // fire-and-forget, non-blocking
   }
   GeoIPOffline().load();
   runApp(const MidOneScannerApp());
@@ -253,10 +249,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // Show config section expanded
   bool _cfConfigExpanded = false;
-  // Validation Mode: 0 = Mode A (WS probe), 1 = Mode B (xray binary)
-  int _cfValidationMode = 0;
-  String? _cfXrayBinPath;
-  bool _cfXrayChecked = false;
   // Sample count presets
   static const _cfCountPresets = [100, 500, 1000, 5000, 20000, 50000, 100000];
   int _cfCountPresetIdx = 1; // default: 500 (SenPai default)
@@ -335,7 +327,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // runs after the first build frame — avoids setState-in-initState warning.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _loadRangeCidrs();
-      if (mounted) _checkXrayBinary();
       if (mounted) _loadSavedCidrs();
     });
   }
@@ -1734,115 +1725,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           const SizedBox(height: 14),
 
-          // ── Validation Mode toggle ───────────────────────────────────────
-          Text('VALIDATION MODE',
-              style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 1.2)),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Expanded(
-                child: GestureDetector(
-                  onTap: () => setState(() => _cfValidationMode = 0),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 9),
-                    decoration: BoxDecoration(
-                      color: _cfValidationMode == 0 ? accentLime : card2Color,
-                      borderRadius: const BorderRadius.horizontal(left: Radius.circular(10)),
-                      border: Border.all(color: _cfValidationMode == 0 ? accentLime : borderColor),
-                    ),
-                    child: Text('⚡ Fast WS',
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.inter(
-                            color: _cfValidationMode == 0 ? bgColor : textPrimary,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13)),
-                  ),
-                ),
-              ),
-              Expanded(
-                child: GestureDetector(
-                  onTap: () {
-                    setState(() => _cfValidationMode = 1);
-                    if (!_cfXrayChecked) _checkXrayBinary();
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 9),
-                    decoration: BoxDecoration(
-                      color: _cfValidationMode == 1 ? const Color(0xFFFFD060) : card2Color,
-                      borderRadius: const BorderRadius.horizontal(right: Radius.circular(10)),
-                      border: Border.all(color: _cfValidationMode == 1 ? const Color(0xFFFFD060) : borderColor),
-                    ),
-                    child: Text('🔬 Xray Binary',
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.inter(
-                            color: _cfValidationMode == 1 ? bgColor : textPrimary,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13)),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          if (_cfValidationMode == 1) ...[ 
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-              decoration: BoxDecoration(
-                color: _cfXrayBinPath != null
-                    ? const Color(0xFF69FF47).withOpacity(0.08)
-                    : const Color(0xFFFF9800).withOpacity(0.08),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: _cfXrayBinPath != null
-                      ? const Color(0xFF69FF47).withOpacity(0.4)
-                      : const Color(0xFFFF9800).withOpacity(0.4),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    _cfXrayBinPath != null ? Icons.check_circle : Icons.warning_amber_rounded,
-                    color: _cfXrayBinPath != null ? const Color(0xFF69FF47) : const Color(0xFFFF9800),
-                    size: 16,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _cfXrayBinPath != null
-                          ? (Platform.isAndroid ? 'xray found ✓' : 'xray.exe found ✓')
-                          : (Platform.isAndroid
-                              ? 'xray not found — binary not extracted'
-                              : 'xray.exe not found — place xray.exe next to app'),
-                      style: GoogleFonts.inter(
-                        color: _cfXrayBinPath != null ? const Color(0xFF69FF47) : const Color(0xFFFF9800),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (_cfParsedConfig == null) ...[
-              const SizedBox(height: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFF5252).withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFFFF5252).withOpacity(0.3)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.info_outline, color: Color(0xFFFF5252), size: 15),
-                    const SizedBox(width: 6),
-                    Text('Xray mode requires a config (VLESS/TROJAN)',
-                        style: GoogleFonts.inter(color: const Color(0xFFFF5252), fontSize: 11)),
-                  ],
-                ),
-              ),
-            ],
-          ],
           const SizedBox(height: 14),
 
           // ── Xray Config (SenPai-style Phase-2) ──────────────────────────
@@ -1978,7 +1860,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               children: [
                 Text(
                   _cfPhase2Total > 0
-                      ? (_cfValidationMode == 1 ? 'Phase 2: Xray binary test...' : 'Phase 2: Config validation...')
+                      ? 'Phase 2: Config validation...'
                       : _cfPhase1Done
                           ? 'Phase 1 done — ${_cfPhase1Results.where((r) => r.isEdge).length} CF edges'
                           : 'Phase 1: CF edge detection...',
@@ -2123,22 +2005,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  // ── Start CF scan (two-phase: CF edge + optional Xray) ─────────────────────
-  Future<void> _checkXrayBinary() async {
-    if (_cfXrayChecked) return;
-    // Ensure bootstrap extraction is complete before checking path
-    if (Platform.isAndroid) {
-      await XrayAndroidBootstrap.init();
-    }
-    final path = await findXrayBinary();
-    if (mounted) {
-      setState(() {
-        _cfXrayBinPath = path;
-        _cfXrayChecked = true;
-      });
-    }
-  }
-
   Future<void> _startCfScan() async {
     if (_cfScanning) return;
 
@@ -2179,7 +2045,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         tries: _cfTries,
         sortMode: _cfSortMode,
         cidrFilter: null,
-        validationMode: _cfValidationMode == 1 ? CfValidationMode.xrayBinary : CfValidationMode.wsProbe,
+        validationMode: CfValidationMode.wsProbe,
         isCancelled: () => _cfCancelled,
         onPhase1Progress: (result, done, total) {
           if (!mounted) return;
@@ -2205,20 +2071,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _cfPhase2Done = config != null;
           final edgeCount = _cfPhase1Results.where((r) => r.isEdge).length;
           final xrayCount = _cfPhase2Results.where((r) => r.success).length;
-          if (_cfValidationMode == 1 && config != null) {
-            final speedVals = _cfPhase2Results
-                .where((r) => r.success && r.validation.throughputKBs > 0)
-                .map((r) => r.validation.throughputKBs)
-                .toList();
-            final speedAvg = speedVals.isEmpty
-                ? 0.0
-                : speedVals.reduce((a, b) => a + b) / speedVals.length;
-            _cfStatus = 'Done! \$xrayCount Xray OK (\${speedAvg.toStringAsFixed(0)} KB/s avg)';
-          } else {
-            _cfStatus = config != null
-                ? 'Done! \$xrayCount Config OK / \$edgeCount CF edge'
-                : 'Done! \$edgeCount CF edge IPs found';
-          }
+          _cfStatus = config != null
+              ? 'Done! \$xrayCount Config OK / \$edgeCount CF edge'
+              : 'Done! \$edgeCount CF edge IPs found';
         });
       }
     } catch (e) {
@@ -2337,9 +2192,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   spacing: 6,
                   children: [
                     Text(r.ip, style: GoogleFonts.robotoMono(color: textPrimary, fontWeight: FontWeight.w700, fontSize: 13)),
-                    _cfBadge(ok ? (_cfValidationMode == 1 ? 'Xray OK' : 'Config OK') : (_cfValidationMode == 1 ? 'Xray FAIL' : 'Config FAIL'), accent),
+                    _cfBadge(ok ? 'Config OK' : 'Config FAIL', accent),
                     if (r.phase1.colo.isNotEmpty) _cfBadge(r.phase1.colo, const Color(0xFF00E5FF)),
-                    if (_cfValidationMode == 1 && ok && r.validation.throughputKBs > 0)
+                    if (ok && r.validation.throughputKBs > 0)
                       _cfBadge('${r.validation.throughputKBs.toStringAsFixed(0)} KB/s', const Color(0xFFFFD060)),
                   ],
                 ),
