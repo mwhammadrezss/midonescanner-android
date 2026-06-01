@@ -1756,8 +1756,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   Expanded(
                     child: Text(
                       _cfXrayBinPath != null
-                          ? 'xray.exe found ✓'
-                          : 'xray.exe not found — place xray.exe next to app',
+                          ? (Platform.isAndroid ? 'xray found ✓' : 'xray.exe found ✓')
+                          : (Platform.isAndroid
+                              ? 'xray not found — binary not extracted'
+                              : 'xray.exe not found — place xray.exe next to app'),
                       style: GoogleFonts.inter(
                         color: _cfXrayBinPath != null ? const Color(0xFF69FF47) : const Color(0xFFFF9800),
                         fontSize: 11,
@@ -2071,6 +2073,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // ── Start CF scan (two-phase: CF edge + optional Xray) ─────────────────────
   Future<void> _checkXrayBinary() async {
     if (_cfXrayChecked) return;
+    // Ensure bootstrap extraction is complete before checking path
+    if (Platform.isAndroid) {
+      await XrayAndroidBootstrap.init();
+    }
     final path = await findXrayBinary();
     if (mounted) {
       setState(() {
