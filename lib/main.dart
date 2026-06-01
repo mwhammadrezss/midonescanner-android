@@ -136,7 +136,7 @@ void main() async {
   if (Platform.isAndroid) {
     await initNotifications();
   }
-  GeoIPOffline().load();
+  await GeoIPOffline().load();
   runApp(const MidOneScannerApp());
 }
 
