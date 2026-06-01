@@ -495,8 +495,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       Set<String> activeCidrs = Set<String>.from(_selectedRangeCidrs);
       if (customCidr.isNotEmpty) {
         final err = _validateCidr(customCidr);
-        if (err != null) { _showSnack('CIDR نامعتبر: \$err'); return; }
-        activeCidrs.add(customCidr.contains('/') ? customCidr : '\$customCidr/32');
+        if (err != null) { _showSnack('CIDR نامعتبر: $err'); return; }
+        activeCidrs.add(customCidr.contains('/') ? customCidr : '$customCidr/32');
       }
       if (activeCidrs.isEmpty) {
         _showSnack('یک رنج انتخاب کن، CIDR وارد کن، یا فایل IP ایمپورت کن.');
@@ -2397,7 +2397,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         setState(() {
           if (secondary) _applyingDns2 = false;
           else           _applyingDns  = false;
-          _applyDnsError = 'Failed (exit \${r1.exitCode}). Run as Administrator.';
+          _applyDnsError = 'Failed (exit ${r1.exitCode}). Run as Administrator.';
         });
       }
     } catch (e) {
@@ -2405,7 +2405,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         if (secondary) _applyingDns2 = false;
         else           _applyingDns  = false;
-        _applyDnsError = 'Error: \$e';
+        _applyDnsError = 'Error: $e';
       });
     }
   }
@@ -3458,7 +3458,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 child: OutlinedButton.icon(
                   onPressed: () {
                     final cidr = _customCidrController.text.trim();
-                    if (cidr.isNotEmpty) _saveCidr(cidr.contains('/') ? cidr : '\$cidr/32');
+                    if (cidr.isNotEmpty) _saveCidr(cidr.contains('/') ? cidr : '$cidr/32');
                   },
                   icon: const Icon(Icons.bookmark_add_rounded, size: 16, color: accentLime),
                   label: Text('ذخیره این رنج', textDirection: TextDirection.rtl,
@@ -4726,7 +4726,7 @@ class _DnsResultCard extends StatelessWidget {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Text(
-                              '✓ \${server.ip} copied!',
+                              '✓ ${server.ip} copied!',
                               style: const TextStyle(fontWeight: FontWeight.w600),
                             ),
                             duration: const Duration(seconds: 2),
