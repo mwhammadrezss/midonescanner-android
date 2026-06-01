@@ -28,3 +28,4 @@ flutter:
     - assets/icons/app_icon.png
     - assets/icons/telegram_icon.png
     - assets/geo/ipcountry.bin
+    - assets/xray/
