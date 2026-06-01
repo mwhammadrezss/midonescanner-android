@@ -117,27 +117,47 @@ class CfPhase2Result {
 List<CfPhase1Result> sortPhase1(List<CfPhase1Result> results, CfSortMode mode) {
   final sorted = List<CfPhase1Result>.from(results);
   sorted.sort((a, b) {
-    // Healthy first (SenPai sortRank)
-    final aHealthy = a.isEdge ? 0 : (a.avgMs > 0 ? 1 : 2);
-    final bHealthy = b.isEdge ? 0 : (b.avgMs > 0 ? 1 : 2);
-    if (aHealthy != bHealthy) return aHealthy.compareTo(bHealthy);
+    // Healthy first — mirrors SenPai sortRank()
+    final aRank = a.isEdge ? 0 : (a.avgMs > 0 || a.lossPercent < 100 ? 1 : 2);
+    final bRank = b.isEdge ? 0 : (b.avgMs > 0 || b.lossPercent < 100 ? 1 : 2);
+    if (aRank != bRank) return aRank.compareTo(bRank);
 
+    // SENPAI-SYNC: mirrors compareResults() secondary+tertiary keys exactly
     switch (mode) {
       case CfSortMode.loss:
-        final c = a.lossPercent.compareTo(b.lossPercent);
-        if (c != 0) return c;
-        return a.avgMs.compareTo(b.avgMs);
+        // SenPai: loss → avg → jitter
+        final c1 = a.lossPercent.compareTo(b.lossPercent);
+        if (c1 != 0) return c1;
+        final c2 = a.avgMs.compareTo(b.avgMs);
+        if (c2 != 0) return c2;
+        return a.jitterMs.compareTo(b.jitterMs);
       case CfSortMode.jitter:
-        final c = a.jitterMs.compareTo(b.jitterMs);
-        if (c != 0) return c;
-        return a.lossPercent.compareTo(b.lossPercent);
-      case CfSortMode.colo:
-        final c = a.colo.compareTo(b.colo);
-        if (c != 0) return c;
+        // SenPai: jitter → loss → avg
+        final c1 = a.jitterMs.compareTo(b.jitterMs);
+        if (c1 != 0) return c1;
+        final c2 = a.lossPercent.compareTo(b.lossPercent);
+        if (c2 != 0) return c2;
         return a.avgMs.compareTo(b.avgMs);
+      case CfSortMode.colo:
+        // SenPai: colo → avg → loss
+        final c1 = a.colo.compareTo(b.colo);
+        if (c1 != 0) return c1;
+        final c2 = a.avgMs.compareTo(b.avgMs);
+        if (c2 != 0) return c2;
+        return a.lossPercent.compareTo(b.lossPercent);
+      case CfSortMode.speed:
+        // Phase1 has no throughput; fall back to avg → loss (SenPai behaviour)
+        final c1 = a.avgMs.compareTo(b.avgMs);
+        if (c1 != 0) return c1;
+        return a.lossPercent.compareTo(b.lossPercent);
       case CfSortMode.avg:
       default:
-        return a.avgMs.compareTo(b.avgMs);
+        // SenPai: avg → loss → jitter
+        final c1 = a.avgMs.compareTo(b.avgMs);
+        if (c1 != 0) return c1;
+        final c2 = a.lossPercent.compareTo(b.lossPercent);
+        if (c2 != 0) return c2;
+        return a.jitterMs.compareTo(b.jitterMs);
     }
   });
   return sorted;
