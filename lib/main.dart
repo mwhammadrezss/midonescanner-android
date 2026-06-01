@@ -2202,8 +2202,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ],
                 ),
                 const SizedBox(height: 4),
-                Text('${r.latencyMs.toStringAsFixed(0)} ms  |  HTTP ${r.httpStatus}',
-                    style: GoogleFonts.inter(color: textSecond, fontSize: 11)),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    Text('avg ${r.avgMs.toStringAsFixed(0)}ms',
+                        style: GoogleFonts.inter(color: textSecond, fontSize: 11)),
+                    if (r.latencies.length > 1) ...[
+                      Text('min ${r.minMs.toStringAsFixed(0)}ms',
+                          style: GoogleFonts.inter(color: const Color(0xFF69FF47), fontSize: 11)),
+                      Text('max ${r.maxMs.toStringAsFixed(0)}ms',
+                          style: GoogleFonts.inter(color: textSecond, fontSize: 11)),
+                      Text('jitter ${r.jitterMs.toStringAsFixed(0)}ms',
+                          style: GoogleFonts.inter(color: const Color(0xFFFFD060), fontSize: 11)),
+                      Text('loss ${r.lossPercent.toStringAsFixed(0)}%',
+                          style: GoogleFonts.inter(
+                              color: r.lossPercent > 0 ? const Color(0xFFFF9800) : textSecond,
+                              fontSize: 11,
+                              fontWeight: r.lossPercent > 0 ? FontWeight.w700 : FontWeight.w400)),
+                    ],
+                    Text('HTTP ${r.httpStatus}',
+                        style: GoogleFonts.inter(color: textSecond, fontSize: 11)),
+                  ],
+                ),
               ],
             ),
           ),
@@ -2246,18 +2266,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
                 const SizedBox(height: 4),
                 if (ok)
-                  Row(children: [
-                    Text('${r.validation.latencyMs.toStringAsFixed(0)} ms',
-                        style: GoogleFonts.inter(color: const Color(0xFF69FF47), fontSize: 11, fontWeight: FontWeight.w600)),
-                    if (r.validation.throughputKBs > 0) ...[
-                      const SizedBox(width: 8),
-                      Text('${r.validation.throughputKBs.toStringAsFixed(0)} KB/s',
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      Text('${r.validation.latencyMs.toStringAsFixed(0)} ms',
+                          style: GoogleFonts.inter(color: const Color(0xFF69FF47), fontSize: 11, fontWeight: FontWeight.w600)),
+                      if (r.validation.throughputKBs > 0)
+                        Text('${r.validation.throughputKBs.toStringAsFixed(0)} KB/s',
+                            style: GoogleFonts.inter(color: textSecond, fontSize: 11)),
+                      Text('CF avg ${r.phase1.avgMs.toStringAsFixed(0)}ms',
                           style: GoogleFonts.inter(color: textSecond, fontSize: 11)),
+                      if (r.phase1.latencies.length > 1) ...[
+                        Text('loss ${r.phase1.lossPercent.toStringAsFixed(0)}%',
+                            style: GoogleFonts.inter(
+                                color: r.phase1.lossPercent > 0 ? const Color(0xFFFF9800) : textSecond,
+                                fontSize: 11,
+                                fontWeight: r.phase1.lossPercent > 0 ? FontWeight.w700 : FontWeight.w400)),
+                        Text('jitter ${r.phase1.jitterMs.toStringAsFixed(0)}ms',
+                            style: GoogleFonts.inter(color: const Color(0xFFFFD060), fontSize: 11)),
+                      ],
                     ],
-                    const SizedBox(width: 8),
-                    Text('CF: ${r.phase1.latencyMs.toStringAsFixed(0)} ms',
-                        style: GoogleFonts.inter(color: textSecond, fontSize: 11)),
-                  ])
+                  )
                 else
                   Text(
                     r.validation.error.isNotEmpty ? r.validation.error : 'validation failed',
