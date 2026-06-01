@@ -10,6 +10,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'engine/scanner_engine.dart';
@@ -287,12 +288,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // ── Range v2 state ────────────────────────────────────────────────────────
   String _rangeCdnProfile = 'cloudflare'; // 'cloudflare' or 'akamai'
   List<String> _rangeCidrs = [];
-  String? _selectedRangeCidr;
+  Set<String> _selectedRangeCidrs = {}; // multi-select
   bool _loadingRangeCidrs = false;
   int _loadRangeCidrsGeneration = 0; // guards against stale fetch completions
-  final _randomCountController = TextEditingController(text: '5000');
   final _customCidrController  = TextEditingController();
   String? _customCidrError;
+  // ── Imported IPs (from txt file) ─────────────────────────────────────────
+  List<String> _importedIps = [];
 
   // ── Saved custom CIDRs (persistent) ─────────────────────────────────────
   List<String> _savedCidrs = [];
@@ -340,7 +342,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _customSniController.dispose();
     _ipController.dispose();
     _cfConfigController.dispose();
-    _randomCountController.dispose();
     _customCidrController.dispose();
     _dnsScanSubscription?.cancel();
     _dnsMonitorTimer?.cancel();
@@ -477,67 +478,58 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_activeScanTab == ScanTab.cloudflare) { _startCfScan(); return; }
     if (_activeScanTab == ScanTab.dns) { _startDnsScan(); return; }
     if (_activeScanTab == ScanTab.range) {
-      // Custom CIDR takes priority over selected range
-      final customCidr = _customCidrController.text.trim();
-      if (customCidr.isNotEmpty) {
-        final err = _validateCidr(customCidr);
-        if (err != null) { _showSnack('CIDR نامعتبر: \$err'); return; }
-        _selectedRangeCidr = customCidr.contains('/') ? customCidr : '\$customCidr/32';
-      }
-      if (_selectedRangeCidr == null) {
-        _showSnack('یک رنج انتخاب کنید یا CIDR دلخواه وارد کنید.');
-        return;
-      }
-      final requestedCount =
-          int.tryParse(_randomCountController.text.trim()) ?? 5000;
-      if (requestedCount < 1 || requestedCount > 500000) {
-        _showSnack('Enter a number between 1 and 500,000.');
+      // ── Mode 1: Imported IPs from txt file ─────────────────────────────
+      if (_importedIps.isNotEmpty) {
+        if (_scanning) return;
+        setState(() {
+          _scanning = true;
+          _cancelled = false;
+          _statusText = 'Scanning ${_importedIps.length} imported IPs...';
+        });
+        _runFastRangeScan(List<String>.from(_importedIps));
         return;
       }
 
-      // Lock the scan button immediately — awaits below would leave it
-      // unlocked for the duration of IP sampling, allowing double-taps.
+      // ── Mode 2: Selected CIDRs (multi) + custom CIDR ───────────────────
+      final customCidr = _customCidrController.text.trim();
+      Set<String> activeCidrs = Set<String>.from(_selectedRangeCidrs);
+      if (customCidr.isNotEmpty) {
+        final err = _validateCidr(customCidr);
+        if (err != null) { _showSnack('CIDR نامعتبر: \$err'); return; }
+        activeCidrs.add(customCidr.contains('/') ? customCidr : '\$customCidr/32');
+      }
+      if (activeCidrs.isEmpty) {
+        _showSnack('یک رنج انتخاب کن، CIDR وارد کن، یا فایل IP ایمپورت کن.');
+        return;
+      }
+
       if (_scanning) return;
       setState(() {
         _scanning = true;
         _cancelled = false;
-        _statusText = 'Building random IP sample...';
+        _statusText = 'Sampling IPs from ${activeCidrs.length} range(s)...';
       });
 
       try {
         final alreadyScanned = await RangeScanStorage().loadScannedIps();
-
         final sampledIps = await RangeIpSampler.sample(
-          allCidrs: [_selectedRangeCidr!],
-          requestedCount: requestedCount,
+          allCidrs: activeCidrs.toList(),
+          requestedCount: 5000,
           alreadyScanned: alreadyScanned,
         );
 
         if (sampledIps.isEmpty) {
-          setState(() {
-            _scanning = false;
-            _statusText = 'All IPs in this range already scanned.';
-          });
-          _showSnack('No new IPs to scan. Go to History → Reset to start fresh.');
+          setState(() { _scanning = false; _statusText = 'All IPs already scanned.'; });
+          _showSnack('No new IPs. Go to History → Reset to start fresh.');
           return;
         }
-
-        // Guard: user may have pressed STOP during the sampling awaits above.
-        // If so, _cancelled=true — don't start the scan engine.
         if (_cancelled) {
-          setState(() {
-            _scanning = false;
-            _statusText = 'Cancelled.';
-          });
+          setState(() { _scanning = false; _statusText = 'Cancelled.'; });
           return;
         }
-
         _runFastRangeScan(sampledIps);
       } catch (e) {
-        setState(() {
-          _scanning = false;
-          _statusText = 'Error preparing scan: $e';
-        });
+        setState(() { _scanning = false; _statusText = 'Error: $e'; });
         _showSnack('Error: $e');
       }
       return;
@@ -3279,43 +3271,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Header row with History button ──────────────────────────────
+          // ── Header ──────────────────────────────────────────────────────
           Row(
             children: [
               Text('CDN PROFILE',
-                  style: GoogleFonts.inter(
-                      color: textSecond,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 11,
-                      letterSpacing: 1.2)),
+                  style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
               const Spacer(),
               GestureDetector(
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => const RangeHistoryPage()),
+                onTap: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const RangeHistoryPage()),
                 ).then((_) {
                   RangeScanStorage().scannedIpCount().then((c) {
                     if (mounted) setState(() => _scannedIpMemoryCount = c);
                   });
                 }),
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: iconBg,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: borderColor),
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(8), border: Border.all(color: borderColor)),
                   child: Row(children: [
-                    const Icon(Icons.history_rounded,
-                        color: accentLime, size: 14),
+                    const Icon(Icons.history_rounded, color: accentLime, size: 14),
                     const SizedBox(width: 4),
-                    Text('History',
-                        style: GoogleFonts.inter(
-                            color: accentLime,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600)),
+                    Text('History', style: GoogleFonts.inter(color: accentLime, fontSize: 11, fontWeight: FontWeight.w600)),
                   ]),
                 ),
               ),
@@ -3323,37 +3299,37 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           const SizedBox(height: 10),
 
-          // ── CDN Profile buttons ─────────────────────────────────────────
-          Row(
-            children: [
-              _buildRangeProfileBtn('cloudflare', '☁️ Cloudflare'),
-              const SizedBox(width: 8),
-              _buildRangeProfileBtn('akamai', '🌐 Akamai'),
-            ],
-          ),
+          // ── CDN Profile ──────────────────────────────────────────────────
+          Row(children: [
+            _buildRangeProfileBtn('cloudflare', '☁️ Cloudflare'),
+            const SizedBox(width: 8),
+            _buildRangeProfileBtn('akamai', '🌐 Akamai'),
+          ]),
           const SizedBox(height: 16),
 
-          // ── SELECT RANGE ────────────────────────────────────────────────
-          Text('SELECT RANGE',
-              style: GoogleFonts.inter(
-                  color: textSecond,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 11,
-                  letterSpacing: 1.2)),
+          // ── SELECT RANGE (multi-select) ───────────────────────────────────
+          Row(
+            children: [
+              Text('SELECT RANGE',
+                  style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
+              const Spacer(),
+              if (_selectedRangeCidrs.isNotEmpty)
+                GestureDetector(
+                  onTap: () => setState(() => _selectedRangeCidrs.clear()),
+                  child: Text('Clear all',
+                      style: GoogleFonts.inter(color: const Color(0xFFFF5252), fontSize: 10, fontWeight: FontWeight.w600)),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text('چند تا رو با هم انتخاب کن',
+              style: GoogleFonts.inter(color: textSecond, fontSize: 10)),
           const SizedBox(height: 8),
 
           if (_loadingRangeCidrs)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(12),
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: accentLime),
-                ),
-              ),
-            )
+            const Center(child: Padding(padding: EdgeInsets.all(12),
+                child: SizedBox(width: 20, height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: accentLime))))
           else if (_rangeCidrs.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
@@ -3369,7 +3345,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 itemCount: _rangeCidrs.length,
                 itemBuilder: (ctx, i) {
                   final cidr = _rangeCidrs[i];
-                  final sel = _selectedRangeCidr == cidr;
+                  final sel = _selectedRangeCidrs.contains(cidr);
                   final count = cidrIpCount(cidr);
                   final countStr = count >= 1000000
                       ? '${(count / 1000000).toStringAsFixed(1)}M IPs'
@@ -3377,27 +3353,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           ? '${(count / 1000).toStringAsFixed(0)}K IPs'
                           : '$count IPs';
                   return GestureDetector(
-                    onTap: () => setState(() => _selectedRangeCidr = cidr),
+                    onTap: () => setState(() {
+                      if (sel) _selectedRangeCidrs.remove(cidr);
+                      else _selectedRangeCidrs.add(cidr);
+                    }),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 150),
                       margin: const EdgeInsets.only(bottom: 5),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 9),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                       decoration: BoxDecoration(
-                        color: sel
-                            ? accentLime.withOpacity(0.08)
-                            : card2Color,
+                        color: sel ? accentLime.withOpacity(0.08) : card2Color,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                            color: sel ? accentLime : borderColor,
-                            width: sel ? 1.5 : 1),
+                        border: Border.all(color: sel ? accentLime : borderColor, width: sel ? 1.5 : 1),
                       ),
                       child: Row(
                         children: [
                           Icon(
-                            sel
-                                ? Icons.radio_button_checked_rounded
-                                : Icons.radio_button_off_rounded,
+                            sel ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
                             size: 15,
                             color: sel ? accentLime : textSecond,
                           ),
@@ -3407,13 +3379,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 style: GoogleFonts.robotoMono(
                                     color: sel ? accentLime : textPrimary,
                                     fontSize: 12,
-                                    fontWeight: sel
-                                        ? FontWeight.w600
-                                        : FontWeight.w400)),
+                                    fontWeight: sel ? FontWeight.w600 : FontWeight.w400)),
                           ),
                           Text('($countStr)',
-                              style: GoogleFonts.inter(
-                                  color: textSecond, fontSize: 11)),
+                              style: GoogleFonts.inter(color: textSecond, fontSize: 11)),
                         ],
                       ),
                     ),
@@ -3422,62 +3391,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
 
-          const SizedBox(height: 16),
-
-          // ── Random sample count input ───────────────────────────────────
-          Text('RANDOM SAMPLE',
-              style: GoogleFonts.inter(
-                  color: textSecond,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 11,
-                  letterSpacing: 1.2)),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _randomCountController,
-            keyboardType: TextInputType.number,
-            style: GoogleFonts.inter(color: textPrimary, fontSize: 14),
-            decoration: InputDecoration(
-              hintText: 'Number of IPs to scan randomly...',
-              hintStyle:
-                  GoogleFonts.inter(color: textSecond, fontSize: 12),
-              filled: true,
-              fillColor: card2Color,
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide.none),
-              focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide:
-                      const BorderSide(color: accentLime, width: 1.5)),
-              enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide:
-                      const BorderSide(color: borderColor, width: 1)),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              const Icon(Icons.memory_rounded,
-                  size: 13, color: textSecond),
-              const SizedBox(width: 5),
-              Text(
-                'Scanned memory: ${_formatMemoryCount(_scannedIpMemoryCount)} IPs — will be skipped',
-                style: GoogleFonts.inter(color: textSecond, fontSize: 11),
+          if (_selectedRangeCidrs.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: accentLime.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: accentLime.withOpacity(0.3)),
               ),
-            ],
-          ),
+              child: Row(
+                children: [
+                  const Icon(Icons.playlist_add_check_rounded, color: accentLime, size: 14),
+                  const SizedBox(width: 6),
+                  Text('${_selectedRangeCidrs.length} range انتخاب شده',
+                      style: GoogleFonts.inter(color: accentLime, fontSize: 11, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ],
+
           const SizedBox(height: 16),
 
-          // ── Custom CIDR input ───────────────────────────────────────────
+          // ── CUSTOM CIDR ───────────────────────────────────────────────────
           Text('CUSTOM RANGE (CIDR)',
-              style: GoogleFonts.inter(
-                  color: textSecond,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 11,
-                  letterSpacing: 1.2)),
+              style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
           const SizedBox(height: 4),
           Text('مثلاً: 2.16.0.0/24 یا فقط 2.16.0.0 برای یک IP',
               style: GoogleFonts.inter(color: textSecond, fontSize: 10)),
@@ -3489,26 +3427,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             decoration: InputDecoration(
               hintText: '192.168.1.0/24',
               hintStyle: GoogleFonts.robotoMono(color: textSecond, fontSize: 12),
-              filled: true,
-              fillColor: card2Color,
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide.none),
-              focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: accentLime, width: 1.5)),
-              enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: borderColor, width: 1)),
+              filled: true, fillColor: card2Color,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: accentLime, width: 1.5)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: borderColor, width: 1)),
               errorText: _customCidrError,
               contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
               suffixIcon: _customCidrController.text.isNotEmpty
                   ? IconButton(
                       icon: const Icon(Icons.clear_rounded, size: 16, color: textSecond),
-                      onPressed: () => setState(() {
-                        _customCidrController.clear();
-                        _customCidrError = null;
-                      }),
+                      onPressed: () => setState(() { _customCidrController.clear(); _customCidrError = null; }),
                     )
                   : null,
             ),
@@ -3516,29 +3444,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               setState(() {
                 _customCidrError = _validateCidr(val.trim());
                 if (_customCidrError == null && val.trim().isNotEmpty) {
-                  _selectedRangeCidr = val.trim().contains('/')
-                      ? val.trim()
-                      : '\${val.trim()}/32';
+                  // custom CIDR به عنوان override عمل میکنه در startScan
                 }
               });
             },
           ),
 
-          // ── Save current custom CIDR button ─────────────────────────────
           if (_customCidrController.text.isNotEmpty && _customCidrError == null)
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: SizedBox(
-                width: double.infinity,
-                height: 40,
+                width: double.infinity, height: 40,
                 child: OutlinedButton.icon(
                   onPressed: () {
                     final cidr = _customCidrController.text.trim();
                     if (cidr.isNotEmpty) _saveCidr(cidr.contains('/') ? cidr : '\$cidr/32');
                   },
                   icon: const Icon(Icons.bookmark_add_rounded, size: 16, color: accentLime),
-                  label: Text('ذخیره این رنج',
-                      textDirection: TextDirection.rtl,
+                  label: Text('ذخیره این رنج', textDirection: TextDirection.rtl,
                       style: GoogleFonts.inter(color: accentLime, fontSize: 12, fontWeight: FontWeight.w600)),
                   style: OutlinedButton.styleFrom(
                     side: const BorderSide(color: accentLime, width: 1),
@@ -3551,26 +3474,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
           const SizedBox(height: 20),
 
-          // ── SAVED RANGES section ─────────────────────────────────────────
+          // ── SAVED RANGES + Import/Export ──────────────────────────────────
           Row(
             children: [
               Text('SAVED RANGES',
-                  style: GoogleFonts.inter(
-                      color: textSecond,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 11,
-                      letterSpacing: 1.2)),
+                  style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
               const Spacer(),
-              // Import button
               GestureDetector(
-                onTap: _importCidrs,
+                onTap: _importIpsFromFile,
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: iconBg,
-                    borderRadius: BorderRadius.circular(7),
-                    border: Border.all(color: borderColor),
-                  ),
+                  decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(7), border: Border.all(color: borderColor)),
                   child: Row(children: [
                     const Icon(Icons.upload_file_rounded, color: accentLime, size: 13),
                     const SizedBox(width: 3),
@@ -3579,7 +3493,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ),
               const SizedBox(width: 6),
-              // Export button
               GestureDetector(
                 onTap: _savedCidrs.isEmpty ? null : _exportCidrs,
                 child: Container(
@@ -3590,15 +3503,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     border: Border.all(color: _savedCidrs.isEmpty ? borderColor.withOpacity(0.4) : borderColor),
                   ),
                   child: Row(children: [
-                    Icon(Icons.download_rounded,
-                        color: _savedCidrs.isEmpty ? textSecond.withOpacity(0.4) : accentLime,
-                        size: 13),
+                    Icon(Icons.download_rounded, color: _savedCidrs.isEmpty ? textSecond.withOpacity(0.4) : accentLime, size: 13),
                     const SizedBox(width: 3),
                     Text('Export',
                         style: GoogleFonts.inter(
                             color: _savedCidrs.isEmpty ? textSecond.withOpacity(0.4) : accentLime,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600)),
+                            fontSize: 10, fontWeight: FontWeight.w600)),
                   ]),
                 ),
               ),
@@ -3606,12 +3516,59 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           const SizedBox(height: 8),
 
+          // ── Imported IPs preview ──────────────────────────────────────────
+          if (_importedIps.isNotEmpty) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00E5FF).withOpacity(0.06),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.list_alt_rounded, color: Color(0xFF00E5FF), size: 14),
+                      const SizedBox(width: 6),
+                      Text('${_importedIps.length} IP آماده اسکن',
+                          style: GoogleFonts.inter(color: const Color(0xFF00E5FF), fontSize: 12, fontWeight: FontWeight.w700)),
+                      const Spacer(),
+                      GestureDetector(
+                        onTap: () => setState(() => _importedIps.clear()),
+                        child: const Icon(Icons.close_rounded, color: Color(0xFFFF5252), size: 16),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 120),
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      physics: const ClampingScrollPhysics(),
+                      itemCount: _importedIps.length > 50 ? 50 : _importedIps.length,
+                      itemBuilder: (ctx, i) => Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 1),
+                        child: Text(
+                          i < 49 || _importedIps.length <= 50
+                              ? _importedIps[i]
+                              : '... و ${_importedIps.length - 49} IP دیگه',
+                          style: GoogleFonts.robotoMono(color: textPrimary, fontSize: 11),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+
           if (_loadingSavedCidrs)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Center(child: SizedBox(width: 16, height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: accentLime))),
-            )
+            const Padding(padding: EdgeInsets.symmetric(vertical: 8),
+                child: Center(child: SizedBox(width: 16, height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: accentLime))))
           else if (_savedCidrs.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
@@ -3628,10 +3585,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 itemCount: _savedCidrs.length,
                 itemBuilder: (ctx, i) {
                   final cidr = _savedCidrs[i];
-                  final sel = _selectedRangeCidr == cidr;
+                  final sel = _selectedRangeCidrs.contains(cidr);
                   return GestureDetector(
                     onTap: () => setState(() {
-                      _selectedRangeCidr = cidr;
+                      if (sel) _selectedRangeCidrs.remove(cidr);
+                      else _selectedRangeCidrs.add(cidr);
                       _customCidrController.text = cidr;
                     }),
                     child: AnimatedContainer(
@@ -3641,17 +3599,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       decoration: BoxDecoration(
                         color: sel ? accentLime.withOpacity(0.08) : card2Color,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                            color: sel ? accentLime : borderColor,
-                            width: sel ? 1.5 : 1),
+                        border: Border.all(color: sel ? accentLime : borderColor, width: sel ? 1.5 : 1),
                       ),
                       child: Row(
                         children: [
-                          Icon(
-                            sel ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
-                            size: 14,
-                            color: sel ? accentLime : textSecond,
-                          ),
+                          Icon(sel ? Icons.check_box_rounded : Icons.bookmark_border_rounded,
+                              size: 14, color: sel ? accentLime : textSecond),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(cidr,
@@ -3662,10 +3615,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           ),
                           GestureDetector(
                             onTap: () => _deleteSavedCidr(cidr),
-                            child: const Padding(
-                              padding: EdgeInsets.all(4),
-                              child: Icon(Icons.close_rounded, size: 14, color: Color(0xFFFF5252)),
-                            ),
+                            child: const Padding(padding: EdgeInsets.all(4),
+                                child: Icon(Icons.close_rounded, size: 14, color: Color(0xFFFF5252))),
                           ),
                         ],
                       ),
@@ -3674,11 +3625,73 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 },
               ),
             ),
+
+          // ── CDN scan progress (live) ───────────────────────────────────────
+          if (_scanning && _activeScanTab == ScanTab.range || (_total > 0 && !_scanning && _activeScanTab == ScanTab.range)) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: cardInner,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: borderColor),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.circle, size: 8, color: _scanning ? accentLime : textSecond),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(_statusText,
+                            style: GoogleFonts.inter(
+                                color: _scanning ? accentLime : textSecond,
+                                fontSize: 12, fontWeight: FontWeight.w500)),
+                      ),
+                      if (_total > 0) ...[
+                        if (_scanning)
+                          Text('ETA ${_calcEta()}',
+                              style: GoogleFonts.inter(color: textSecond, fontSize: 10)),
+                        const SizedBox(width: 6),
+                        Text('\$_done / \$_total',
+                            style: GoogleFonts.inter(color: textPrimary, fontSize: 12, fontWeight: FontWeight.w700)),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(5),
+                    child: LinearProgressIndicator(
+                      value: _prefiltering ? null : (_total > 0 ? _done / _total : 0.0),
+                      backgroundColor: iconBg,
+                      valueColor: AlwaysStoppedAnimation(
+                          _prefiltering ? const Color(0xFFFFAB40) : accentLime2),
+                      minHeight: 5,
+                    ),
+                  ),
+                  if (_okCount > 0 || _failCount > 0) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        _chip(Icons.check_circle_outline_rounded, '\$_okCount alive', accentLime),
+                        const SizedBox(width: 6),
+                        _chip(Icons.cancel_outlined, '\$_failCount dead', const Color(0xFFFF5252)),
+                        if (_thrCount > 0) ...[
+                          const SizedBox(width: 6),
+                          _chip(Icons.speed_rounded, '\$_thrCount throttled', const Color(0xFFFFAB40)),
+                        ],
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
-
   Widget _buildRangeProfileBtn(String value, String label) {
     final active = _rangeCdnProfile == value;
     return Expanded(
@@ -3689,7 +3702,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 setState(() {
                   _rangeCdnProfile = value;
                   _rangeCidrs = [];
-                  _selectedRangeCidr = null;
+                  _selectedRangeCidrs.clear();
                 });
                 _loadRangeCidrs();
               },
@@ -3835,6 +3848,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// Import IPs from a plain-text file — one IP per line.
+  /// Shows them in a preview card inside the Range tab; starts scan directly.
+  Future<void> _importIpsFromFile() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['txt', 'csv'],
+        withData: true,
+      );
+      if (result == null || result.files.isEmpty) return;
+      final bytes = result.files.first.bytes;
+      if (bytes == null) return;
+      final text = String.fromCharCodes(bytes);
+      final ips = text
+          .split(RegExp(r'[\r\n,;\s]+'))
+          .map((s) => s.trim())
+          .where((s) {
+            if (s.isEmpty) return false;
+            // basic IPv4 check
+            final parts = s.split('.');
+            if (parts.length != 4) return false;
+            return parts.every((p) {
+              final n = int.tryParse(p);
+              return n != null && n >= 0 && n <= 255;
+            });
+          })
+          .toList();
+      if (ips.isEmpty) {
+        _showSnack('⚠️ هیچ IP معتبری در فایل پیدا نشد.');
+        return;
+      }
+      if (!mounted) return;
+      setState(() => _importedIps = ips);
+      _showSnack('✅ ${ips.length} IP ایمپورت شد — استارت بزن.');
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack('❌ خطا: ${e.toString()}');
+    }
+  }
+
   void _loadRangeCidrs() {
     final meta = kCdnProviders.firstWhere(
       (m) => (_rangeCdnProfile == 'cloudflare'
@@ -3852,7 +3905,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (_loadRangeCidrsGeneration != myGeneration) return; // stale, discard
       setState(() {
         _rangeCidrs = cidrs;
-        _selectedRangeCidr = cidrs.isNotEmpty ? cidrs.first : null;
+        if (_selectedRangeCidrs.isEmpty && cidrs.isNotEmpty) _selectedRangeCidrs = {cidrs.first};
         _loadingRangeCidrs = false;
       });
     }).catchError((_) {
@@ -3860,8 +3913,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (_loadRangeCidrsGeneration != myGeneration) return; // stale, discard
       setState(() {
         _rangeCidrs = meta.fallback;
-        _selectedRangeCidr =
-            meta.fallback.isNotEmpty ? meta.fallback.first : null;
+        if (_selectedRangeCidrs.isEmpty and meta.fallback.isNotEmpty) _selectedRangeCidrs = {meta.fallback.first};
         _loadingRangeCidrs = false;
       });
     });
@@ -3876,7 +3928,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             child: ElevatedButton(
               onPressed: _scanning
                   ? _stopScan
-                  : (_activeScanTab == ScanTab.range && _selectedRangeCidr == null ? null : _startScan),
+                  : (_activeScanTab == ScanTab.range &&
+                      _selectedRangeCidrs.isEmpty &&
+                      _customCidrController.text.trim().isEmpty &&
+                      _importedIps.isEmpty
+                        ? null : _startScan),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _scanning ? const Color(0xFF3A1A1A) : accentLime,
                 foregroundColor: _scanning ? const Color(0xFFFF5252) : bgColor,
