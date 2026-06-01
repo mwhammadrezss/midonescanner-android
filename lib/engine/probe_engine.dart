@@ -540,7 +540,7 @@ CfMultiProbeResult _buildMultiResult({
     if (successful.length >= 2) {
       final variance = successful
           .map((l) => (l - avgMs) * (l - avgMs))
-          .reduce((a, b) => a + b) / successful.length;
+          .reduce((a, b) => a + b) / (successful.length - 1); // Bessel's correction (sample variance)
       jitterMs = sqrt(variance);
     }
   }
