@@ -133,6 +133,12 @@ jobs:
             Write-Host "ℹ️ windows/ already exists"
           }
 
+      - name: 📁 Ensure assets/xray dir exists (required by pubspec.yaml)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "assets\xray" | Out-Null
+          Write-Host "✅ assets/xray directory ready"
+
       - name: 🔨 Build Windows Release
         run: flutter build windows --release
 
