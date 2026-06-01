@@ -14,7 +14,7 @@ import 'dart:async';
 import '../xray/config_parser.dart';
 import '../xray/xray_validator.dart';
 import 'cf_ip_ranges.dart';
-import 'probe_engine.dart' show cfHttpProbeMulti, cfWsProbe, CfHttpResult,
+import 'probe_engine.dart' show cfHttpProbeMulti, cfWsProbe,
     CfMultiProbeResult, cfHttpProbe;
 
 // ─── Validation mode ──────────────────────────────────────────────────────────
