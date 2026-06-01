@@ -22,6 +22,7 @@ import 'engine/subnet_cache.dart';
 import 'models/cdn_provider.dart';
 import 'engine/range_engine.dart';
 import 'storage/range_scan_storage.dart';
+import 'storage/custom_cidr_storage.dart';
 import 'engine/range_ip_sampler.dart';
 import 'ui/range/range_history_page.dart';
 import 'dns_scanner/scanner.dart';
@@ -298,6 +299,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _randomCountController = TextEditingController(text: '5000');
   final _customCidrController  = TextEditingController();
   String? _customCidrError;
+
+  // ── Saved custom CIDRs (persistent) ─────────────────────────────────────
+  List<String> _savedCidrs = [];
+  bool _loadingSavedCidrs = false;
   int _scannedIpMemoryCount = 0;
 
   // Batched UI updates
@@ -329,6 +334,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _loadRangeCidrs();
       if (mounted) _checkXrayBinary();
+      if (mounted) _loadSavedCidrs();
     });
   }
 
@@ -3525,11 +3531,162 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 if (_customCidrError == null && val.trim().isNotEmpty) {
                   _selectedRangeCidr = val.trim().contains('/')
                       ? val.trim()
-                      : '${val.trim()}/32';
+                      : '\${val.trim()}/32';
                 }
               });
             },
           ),
+
+          // ── Save current custom CIDR button ─────────────────────────────
+          if (_customCidrController.text.isNotEmpty && _customCidrError == null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: SizedBox(
+                width: double.infinity,
+                height: 40,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    final cidr = _customCidrController.text.trim();
+                    if (cidr.isNotEmpty) _saveCidr(cidr.contains('/') ? cidr : '\$cidr/32');
+                  },
+                  icon: const Icon(Icons.bookmark_add_rounded, size: 16, color: accentLime),
+                  label: Text('ذخیره این رنج',
+                      textDirection: TextDirection.rtl,
+                      style: GoogleFonts.inter(color: accentLime, fontSize: 12, fontWeight: FontWeight.w600)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: accentLime, width: 1),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    backgroundColor: accentLime.withOpacity(0.06),
+                  ),
+                ),
+              ),
+            ),
+
+          const SizedBox(height: 20),
+
+          // ── SAVED RANGES section ─────────────────────────────────────────
+          Row(
+            children: [
+              Text('SAVED RANGES',
+                  style: GoogleFonts.inter(
+                      color: textSecond,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                      letterSpacing: 1.2)),
+              const Spacer(),
+              // Import button
+              GestureDetector(
+                onTap: _importCidrs,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: iconBg,
+                    borderRadius: BorderRadius.circular(7),
+                    border: Border.all(color: borderColor),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.upload_file_rounded, color: accentLime, size: 13),
+                    const SizedBox(width: 3),
+                    Text('Import', style: GoogleFonts.inter(color: accentLime, fontSize: 10, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              ),
+              const SizedBox(width: 6),
+              // Export button
+              GestureDetector(
+                onTap: _savedCidrs.isEmpty ? null : _exportCidrs,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _savedCidrs.isEmpty ? card2Color : iconBg,
+                    borderRadius: BorderRadius.circular(7),
+                    border: Border.all(color: _savedCidrs.isEmpty ? borderColor.withOpacity(0.4) : borderColor),
+                  ),
+                  child: Row(children: [
+                    Icon(Icons.download_rounded,
+                        color: _savedCidrs.isEmpty ? textSecond.withOpacity(0.4) : accentLime,
+                        size: 13),
+                    const SizedBox(width: 3),
+                    Text('Export',
+                        style: GoogleFonts.inter(
+                            color: _savedCidrs.isEmpty ? textSecond.withOpacity(0.4) : accentLime,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+
+          if (_loadingSavedCidrs)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Center(child: SizedBox(width: 16, height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: accentLime))),
+            )
+          else if (_savedCidrs.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text('هنوز رنجی ذخیره نشده. یک CIDR وارد کن و دکمه «ذخیره» رو بزن.',
+                  textDirection: TextDirection.rtl,
+                  style: GoogleFonts.inter(color: textSecond, fontSize: 11)),
+            )
+          else
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 200),
+              child: ListView.builder(
+                shrinkWrap: true,
+                physics: const ClampingScrollPhysics(),
+                itemCount: _savedCidrs.length,
+                itemBuilder: (ctx, i) {
+                  final cidr = _savedCidrs[i];
+                  final sel = _selectedRangeCidr == cidr;
+                  return GestureDetector(
+                    onTap: () => setState(() {
+                      _selectedRangeCidr = cidr;
+                      _customCidrController.text = cidr;
+                    }),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      margin: const EdgeInsets.only(bottom: 5),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                      decoration: BoxDecoration(
+                        color: sel ? accentLime.withOpacity(0.08) : card2Color,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: sel ? accentLime : borderColor,
+                            width: sel ? 1.5 : 1),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            sel ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                            size: 14,
+                            color: sel ? accentLime : textSecond,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(cidr,
+                                style: GoogleFonts.robotoMono(
+                                    color: sel ? accentLime : textPrimary,
+                                    fontSize: 12,
+                                    fontWeight: sel ? FontWeight.w600 : FontWeight.w400)),
+                          ),
+                          GestureDetector(
+                            onTap: () => _deleteSavedCidr(cidr),
+                            child: const Padding(
+                              padding: EdgeInsets.all(4),
+                              child: Icon(Icons.close_rounded, size: 14, color: Color(0xFFFF5252)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
         ],
       ),
     );
@@ -3634,6 +3791,61 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
     return result.where((ip) => !isPrivateOrReserved(ip)).toList();
+  }
+
+  // ── Saved CIDRs helpers ──────────────────────────────────────────────────
+
+  Future<void> _loadSavedCidrs() async {
+    if (!mounted) return;
+    setState(() => _loadingSavedCidrs = true);
+    final cidrs = await CustomCidrStorage().load();
+    if (!mounted) return;
+    setState(() {
+      _savedCidrs = cidrs;
+      _loadingSavedCidrs = false;
+    });
+  }
+
+  Future<void> _saveCidr(String cidr) async {
+    final added = await CustomCidrStorage().add(cidr);
+    if (!mounted) return;
+    if (added) {
+      await _loadSavedCidrs();
+      _showSnack('✅ رنج ذخیره شد: $cidr');
+    } else {
+      _showSnack('⚠️ این رنج قبلاً ذخیره شده یا لیست پر است (max 50)');
+    }
+  }
+
+  Future<void> _deleteSavedCidr(String cidr) async {
+    await CustomCidrStorage().remove(cidr);
+    if (!mounted) return;
+    await _loadSavedCidrs();
+    _showSnack('🗑 حذف شد: $cidr');
+  }
+
+  Future<void> _exportCidrs() async {
+    try {
+      final path = await CustomCidrStorage().exportToFile();
+      if (!mounted) return;
+      _showSnack('✅ اکسپورت شد:\n$path');
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack('❌ خطا: ${e.toString()}');
+    }
+  }
+
+  Future<void> _importCidrs() async {
+    final count = await CustomCidrStorage().importFromFile();
+    if (!mounted) return;
+    if (count == -1) {
+      // user cancelled
+    } else if (count == 0) {
+      _showSnack('⚠️ هیچ CIDR معتبری در فایل پیدا نشد.');
+    } else {
+      await _loadSavedCidrs();
+      _showSnack('✅ $count رنج ایمپورت شد.');
+    }
   }
 
   void _loadRangeCidrs() {
