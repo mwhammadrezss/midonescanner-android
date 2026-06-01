@@ -7,11 +7,9 @@
         android:maxSdkVersion="28"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32"/>
-    <!-- Android 13+ media access for file_picker -->
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"
-        android:minSdkVersion="33"/>
-    <uses-permission android:name="android.permission.READ_MEDIA_DOCUMENTS"
-        android:minSdkVersion="33"/>
+    <!-- Android 13+ (API 33): file_picker needs READ_MEDIA_VISUAL_USER_SELECTED
+         for picking files from shared storage. READ_MEDIA_IMAGES covers images;
+         for generic .txt file access the SAF intent below is sufficient. -->
 
     <!-- url_launcher: باز کردن لینک تلگرام -->
     <queries>
@@ -19,7 +17,7 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
         </intent>
-        <!-- file_picker: open document picker -->
+        <!-- file_picker: open document picker (SAF) -->
         <intent>
             <action android:name="android.intent.action.GET_CONTENT" />
             <data android:mimeType="*/*" />
