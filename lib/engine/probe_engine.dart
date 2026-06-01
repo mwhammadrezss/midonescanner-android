@@ -61,12 +61,6 @@ class ProbeTimings {
   });
 }
 
-// ── p17: Captive portal detection ────────────────────────────────────────────
-bool isCaptivePortalCert(X509Certificate cert) {
-  if (cert.pem.length < 300) return true;
-  return false;
-}
-
 // ── Cert validation helper ───────────────────────────────────────────────────
 bool acceptCdnCert(X509Certificate cert) {
   if (cert.pem.isEmpty) return false;
