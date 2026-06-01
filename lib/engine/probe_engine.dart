@@ -468,9 +468,10 @@ Future<({double latencyMs, CfHttpResult result})> _cfHttpProbeSingle(
 /// Returns CfMultiProbeResult with full loss/latency stats.
 Future<CfMultiProbeResult> cfHttpProbeMulti(
   String ip, {
-  String sni        = '',
-  int    tries      = 4,   // SenPai default = 4
-  int    budgetMs   = 5000, // SenPai default = 5s
+  String sni          = '',
+  int    tries        = 4,       // SenPai default = 4
+  int    budgetMs     = 5000,    // SenPai default = 5s
+  bool Function()? isCancelled,  // mirrors SenPai ctx.Err() check
 }) async {
   final effectiveSni = sni.isNotEmpty ? sni : 'speed.cloudflare.com';
   final latencies    = List<double>.filled(tries, 0);
@@ -479,6 +480,8 @@ Future<CfMultiProbeResult> cfHttpProbeMulti(
   String colo        = '';
 
   for (int i = 0; i < tries; i++) {
+    // SENPAI-SYNC: mirrors SenPai "if ctx.Err() != nil { break }"
+    if (isCancelled != null && isCancelled()) break;
     final r = await _cfHttpProbeSingle(ip, sni: effectiveSni, budgetMs: budgetMs);
     latencies[i] = r.latencyMs; // 0 = failed (mirrors SenPai Latencies[i]=0)
     if (r.result.tlsOk)    tlsOk      = true;
