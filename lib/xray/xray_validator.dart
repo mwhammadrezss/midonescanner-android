@@ -531,6 +531,9 @@ Future<double> _measureSocks5Speed(int socksPort, {
 }
 
 // Downloads via SOCKS5 CONNECT tunnel, returns bytes/second
+// FIX: Same as _socks5ConnectivityCheck — use single sock.listen() + rxBuf
+// to avoid "Bad state: Stream has already been listened to" when calling
+// SecureSocket.secure() after _readBytes() has already listened to the stream.
 Future<double> _downloadViaSocks5({
   required int socksPort,
   required String host,
@@ -546,11 +549,29 @@ Future<double> _downloadViaSocks5({
     sock = await Socket.connect('127.0.0.1', socksPort,
         timeout: const Duration(seconds: 5));
 
+    // Single listener — buffer all incoming bytes
+    final rxBuf = <int>[];
+    sock.listen(
+      (data) => rxBuf.addAll(data),
+      onError: (_) {},
+      cancelOnError: false,
+    );
+
+    Future<bool> waitBytes(int n, Duration tout) async {
+      final deadline = DateTime.now().add(tout);
+      while (rxBuf.length < n) {
+        if (DateTime.now().isAfter(deadline)) return false;
+        await Future.delayed(const Duration(milliseconds: 20));
+      }
+      return true;
+    }
+
     // SOCKS5 handshake
     sock.add([0x05, 0x01, 0x00]);
     await sock.flush();
-    final greet = await _readBytes(sock, 2, const Duration(seconds: 3));
-    if (greet == null || greet[1] != 0x00) return 0.0;
+    if (!await waitBytes(2, const Duration(seconds: 3))) return 0.0;
+    if (rxBuf[1] != 0x00) return 0.0;
+    rxBuf.removeRange(0, 2);
 
     // SOCKS5 CONNECT
     final hostBytes = utf8.encode(host);
@@ -560,9 +581,10 @@ Future<double> _downloadViaSocks5({
       (port >> 8) & 0xFF, port & 0xFF,
     ]);
     await sock.flush();
-    final resp = await _readBytes(sock, 4, const Duration(seconds: 5));
-    if (resp == null || resp[1] != 0x00) return 0.0;
-    await Future.delayed(const Duration(milliseconds: 50));
+    if (!await waitBytes(4, const Duration(seconds: 5))) return 0.0;
+    if (rxBuf[1] != 0x00) return 0.0;
+    await Future.delayed(const Duration(milliseconds: 80));
+    rxBuf.clear();
 
     // TLS if needed
     IOSink sink;
