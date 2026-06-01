@@ -9,6 +9,7 @@ import 'dart:math';
 import 'package:path_provider/path_provider.dart';
 
 import 'config_parser.dart';
+import 'xray_android_bootstrap.dart';
 
 /// Result of validating a single config against an IP.
 class XrayValidationResult {
@@ -92,6 +93,12 @@ Future<String?> _findXrayBinary() async {
   final candidates = <String>[];
 
   if (Platform.isAndroid) {
+    // Try bootstrap first — auto-extracts binary from assets if needed
+    try {
+      final bootstrapped = await XrayAndroidBootstrap.getXrayPath();
+      if (bootstrapped != null) return bootstrapped;
+    } catch (_) {}
+
     try {
       final dir = await getApplicationSupportDirectory();
       candidates.add('${dir.path}/xray');
