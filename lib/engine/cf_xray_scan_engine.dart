@@ -157,8 +157,17 @@ List<CfPhase1Result> sortPhase1(List<CfPhase1Result> results, CfSortMode mode) {
         if (c1 != 0) return c1;
         final c2 = a.lossPercent.compareTo(b.lossPercent);
         if (c2 != 0) return c2;
-        return a.jitterMs.compareTo(b.jitterMs);
+        final c3 = a.jitterMs.compareTo(b.jitterMs);
+        if (c3 != 0) return c3;
     }
+    // SENPAI-SYNC: final tiebreakers = cmpBool(tlsOk), cmpBool(wsOk), cmpString(ip)
+    // mirrors compareResults() last 3 lines exactly
+    final tTls = (a.tlsOk == b.tlsOk) ? 0 : (a.tlsOk ? -1 : 1);
+    if (tTls != 0) return tTls;
+    final tWs = ((a.wsOk ?? false) == (b.wsOk ?? false))
+        ? 0 : ((a.wsOk ?? false) ? -1 : 1);
+    if (tWs != 0) return tWs;
+    return a.ip.compareTo(b.ip);
   });
   return sorted;
 }
@@ -208,8 +217,16 @@ List<CfPhase2Result> sortPhase2(List<CfPhase2Result> results, CfSortMode mode) {
         if (c1 != 0) return c1;
         final c2 = a.phase1.lossPercent.compareTo(b.phase1.lossPercent);
         if (c2 != 0) return c2;
-        return a.phase1.jitterMs.compareTo(b.phase1.jitterMs);
+        final c3 = a.phase1.jitterMs.compareTo(b.phase1.jitterMs);
+        if (c3 != 0) return c3;
     }
+    // SENPAI-SYNC: final tiebreakers = cmpBool(tlsOk), cmpBool(wsOk), cmpString(ip)
+    final tTls = (a.phase1.tlsOk == b.phase1.tlsOk) ? 0 : (a.phase1.tlsOk ? -1 : 1);
+    if (tTls != 0) return tTls;
+    final tWs = ((a.phase1.wsOk ?? false) == (b.phase1.wsOk ?? false))
+        ? 0 : ((a.phase1.wsOk ?? false) ? -1 : 1);
+    if (tWs != 0) return tWs;
+    return a.phase1.ip.compareTo(b.phase1.ip);
   });
   return sorted;
 }
