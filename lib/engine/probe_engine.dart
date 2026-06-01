@@ -339,60 +339,71 @@ Future<CfHttpResult> cfHttpProbe(
 }) async {
   final effectiveSni = sni.isNotEmpty ? sni : 'speed.cloudflare.com';
 
-  Socket?             raw;
-  SecureSocket?       tls;
-  StreamSubscription? sub;
-  try {
-    raw = await Socket.connect(
-      ip, 443,
-      timeout: Duration(milliseconds: totalBudgetMs ~/ 4),
-    );
+  const tries = 3; // 3 tries like SenPai default
+  for (int attempt = 0; attempt < tries; attempt++) {
+    Socket?             raw;
+    SecureSocket?       tls;
+    StreamSubscription? sub;
+    try {
+      raw = await Socket.connect(
+        ip, 443,
+        timeout: Duration(milliseconds: totalBudgetMs ~/ 4),
+      );
 
-    await Future.delayed(Duration(microseconds: 100 + _probeRng.nextInt(900)));
+      await Future.delayed(Duration(microseconds: 100 + _probeRng.nextInt(900)));
 
-    tls = await SecureSocket.secure(
-      raw,
-      host: effectiveSni,
-      onBadCertificate: acceptCdnCert,
-    ).timeout(Duration(milliseconds: totalBudgetMs ~/ 2));
+      tls = await SecureSocket.secure(
+        raw,
+        host: effectiveSni,
+        onBadCertificate: acceptCdnCert,
+      ).timeout(Duration(milliseconds: totalBudgetMs ~/ 2));
 
-    tls.write(
-      'GET /cdn-cgi/trace HTTP/1.1\r\n'
-      'Host: $effectiveSni\r\n'
-      'User-Agent: MidONe/1.0\r\n'
-      'Connection: close\r\n\r\n',
-    );
+      tls.write(
+        'GET /cdn-cgi/trace HTTP/1.1\r\n'
+        'Host: $effectiveSni\r\n'
+        'User-Agent: MidONe/1.0\r\n'
+        'Connection: close\r\n\r\n',
+      );
 
-    final buf       = StringBuffer();
-    final completer = Completer<void>();
-    sub = tls.listen(
-      (chunk) {
-        buf.write(utf8.decode(chunk, allowMalformed: true));
-        if (buf.length > 2048 && !completer.isCompleted) completer.complete();
-      },
-      onDone:        () { if (!completer.isCompleted) completer.complete(); },
-      onError:       (_) { if (!completer.isCompleted) completer.complete(); },
-      cancelOnError: true,
-    );
+      final buf       = StringBuffer();
+      final completer = Completer<void>();
+      sub = tls.listen(
+        (chunk) {
+          buf.write(utf8.decode(chunk, allowMalformed: true));
+          if (buf.length > 2048 && !completer.isCompleted) completer.complete();
+        },
+        onDone:        () { if (!completer.isCompleted) completer.complete(); },
+        onError:       (_) { if (!completer.isCompleted) completer.complete(); },
+        cancelOnError: true,
+      );
 
-    await completer.future
-        .timeout(Duration(milliseconds: totalBudgetMs ~/ 4))
-        .catchError((_) {});
+      await completer.future
+          .timeout(Duration(milliseconds: totalBudgetMs ~/ 4))
+          .catchError((_) {});
 
-    await sub.cancel();
+      await sub.cancel();
 
-    final response   = buf.toString();
-    final httpStatus = _cfParseHttpStatus(response);
-    final colo       = _cfParseColo(response);
+      final response   = buf.toString();
+      final httpStatus = _cfParseHttpStatus(response);
+      final colo       = _cfParseColo(response);
 
-    return CfHttpResult(tlsOk: true, httpStatus: httpStatus, colo: colo);
-  } catch (_) {
-    return const CfHttpResult(tlsOk: false, httpStatus: -1, colo: '');
-  } finally {
-    try { await sub?.cancel(); } catch (_) {}
-    try { tls?.destroy();      } catch (_) {}
-    try { raw?.destroy();      } catch (_) {}
+      if (colo.isNotEmpty || httpStatus > 0) {
+        return CfHttpResult(tlsOk: true, httpStatus: httpStatus, colo: colo);
+      }
+    } catch (_) {
+      // fall through to retry
+    } finally {
+      try { await sub?.cancel(); } catch (_) {}
+      try { tls?.destroy();      } catch (_) {}
+      try { raw?.destroy();      } catch (_) {}
+    }
+
+    if (attempt < tries - 1) {
+      await Future.delayed(Duration(milliseconds: 10 + _probeRng.nextInt(50)));
+    }
   }
+
+  return const CfHttpResult(tlsOk: false, httpStatus: -1, colo: '');
 }
 
 int _cfParseHttpStatus(String response) {
