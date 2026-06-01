@@ -166,14 +166,50 @@ List<CfPhase1Result> sortPhase1(List<CfPhase1Result> results, CfSortMode mode) {
 List<CfPhase2Result> sortPhase2(List<CfPhase2Result> results, CfSortMode mode) {
   final sorted = List<CfPhase2Result>.from(results);
   sorted.sort((a, b) {
-    // Successes first
-    if (a.success && !b.success) return -1;
-    if (!a.success && b.success) return 1;
-    if (mode == CfSortMode.speed) {
-      final c = b.validation.throughputKBs.compareTo(a.validation.throughputKBs);
-      if (c != 0) return c;
+    // Success first — mirrors SenPai sortRank (healthy=0 > partial=1 > dead=2)
+    final aRank = a.success ? 0 : (a.phase1.avgMs > 0 ? 1 : 2);
+    final bRank = b.success ? 0 : (b.phase1.avgMs > 0 ? 1 : 2);
+    if (aRank != bRank) return aRank.compareTo(bRank);
+
+    // SENPAI-SYNC: compareResults() secondary+tertiary keys for phase2
+    switch (mode) {
+      case CfSortMode.speed:
+        // SenPai SortBySpeed: throughput DESC → avg → loss
+        final c1 = b.validation.throughputKBs.compareTo(a.validation.throughputKBs);
+        if (c1 != 0) return c1;
+        final c2 = a.validation.latencyMs.compareTo(b.validation.latencyMs);
+        if (c2 != 0) return c2;
+        return a.phase1.lossPercent.compareTo(b.phase1.lossPercent);
+      case CfSortMode.loss:
+        // SenPai SortByLoss: loss → avg → jitter
+        final c1 = a.phase1.lossPercent.compareTo(b.phase1.lossPercent);
+        if (c1 != 0) return c1;
+        final c2 = a.validation.latencyMs.compareTo(b.validation.latencyMs);
+        if (c2 != 0) return c2;
+        return a.phase1.jitterMs.compareTo(b.phase1.jitterMs);
+      case CfSortMode.jitter:
+        // SenPai SortByJitter: jitter → loss → avg
+        final c1 = a.phase1.jitterMs.compareTo(b.phase1.jitterMs);
+        if (c1 != 0) return c1;
+        final c2 = a.phase1.lossPercent.compareTo(b.phase1.lossPercent);
+        if (c2 != 0) return c2;
+        return a.validation.latencyMs.compareTo(b.validation.latencyMs);
+      case CfSortMode.colo:
+        // SenPai SortByColo: colo → avg → loss
+        final c1 = a.phase1.colo.compareTo(b.phase1.colo);
+        if (c1 != 0) return c1;
+        final c2 = a.validation.latencyMs.compareTo(b.validation.latencyMs);
+        if (c2 != 0) return c2;
+        return a.phase1.lossPercent.compareTo(b.phase1.lossPercent);
+      case CfSortMode.avg:
+      default:
+        // SenPai SortByAvg: avg → loss → jitter
+        final c1 = a.validation.latencyMs.compareTo(b.validation.latencyMs);
+        if (c1 != 0) return c1;
+        final c2 = a.phase1.lossPercent.compareTo(b.phase1.lossPercent);
+        if (c2 != 0) return c2;
+        return a.phase1.jitterMs.compareTo(b.phase1.jitterMs);
     }
-    return a.phase1.avgMs.compareTo(b.phase1.avgMs);
   });
   return sorted;
 }
