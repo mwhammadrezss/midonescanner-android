@@ -653,38 +653,50 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     int done = 0;
-    for (int batchStart = 0; batchStart < ips.length; batchStart += batchSize) {
-      if (_cancelled) break;
-      final batch = ips.skip(batchStart).take(batchSize).toList();
+    try {
+      for (int batchStart = 0; batchStart < ips.length; batchStart += batchSize) {
+        if (_cancelled) break;
+        final batch = ips.skip(batchStart).take(batchSize).toList();
 
-      final results = await Future.wait(
-        batch.map((ip) => probeOne(ip)).toList(),
-        eagerError: false,
-      );
+        final results = await Future.wait(
+          batch.map((ip) => probeOne(ip)).toList(),
+          eagerError: false,
+        );
 
-      for (final r in results) {
-        _pendingResults.add(r);
-        done++;
-        if (r.isAlive) _okCount++;
-        else _failCount++;
+        for (final r in results) {
+          _pendingResults.add(r);
+          done++;
+          if (r.isAlive) _okCount++;
+          else _failCount++;
+        }
+
+        _done = done;
+        final pct = (_done / _total * 100).round();
+        setState(() {
+          _statusText = 'Fast scan $pct% — batch ${batchStart ~/ batchSize + 1}/${(ips.length / batchSize).ceil()}';
+        });
+
+        if (!_cancelled && batchStart + batchSize < ips.length) {
+          await Future.delayed(batchDelay);
+        }
       }
-
-      _done = done;
-      final pct = (_done / _total * 100).round();
-      setState(() {
-        _statusText = 'Fast scan $pct% — batch ${batchStart ~/ batchSize + 1}/${(ips.length / batchSize).ceil()}';
-      });
-
-      if (!_cancelled && batchStart + batchSize < ips.length) {
-        await Future.delayed(batchDelay);
+    } catch (e) {
+      if (mounted) {
+        setState(() { _statusText = 'Scan error: $e'; });
+        _showSnack('Scan error: $e');
+      }
+    } finally {
+      _stopBatchTimer();
+      if (mounted) {
+        setState(() {
+          _scanning = false;
+          _displayDirty = true;
+        });
       }
     }
 
-    _stopBatchTimer();
-    if (mounted) {
+    if (mounted && !_cancelled) {
       setState(() {
-        _scanning = false;
-        _displayDirty = true;
         _statusText = 'Done! ${_results.where((r) => r.isAlive).length} alive from ${ips.length}';
       });
       _showSnack('\u2713 Done! ${_results.where((r) => r.isAlive).length} alive IPs found');
