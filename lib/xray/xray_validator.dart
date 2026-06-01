@@ -153,10 +153,13 @@ Future<XrayValidationResult> _validateWithXray(
     tmpFile = File('${tmpDir.path}/config.json');
     await tmpFile.writeAsString(configJson);
 
+    // Get geo assets dir (geoip.dat + geosite.dat extracted from APK)
+    final geoDir = (await XrayAndroidBootstrap.getAssetDir()) ?? tmpDir.path;
+
     xrayProcess = await Process.start(
       xrayBin,
       ['run', '-c', tmpFile.path],
-      environment: {'XRAY_LOCATION_ASSET': tmpDir.path},
+      environment: {'XRAY_LOCATION_ASSET': geoDir},
     );
 
     final portReady = await _waitForPort('127.0.0.1', socksPort,
