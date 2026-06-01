@@ -519,17 +519,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
 
         if (sampledIps.isEmpty) {
-          setState(() { _scanning = false; _statusText = 'All IPs already scanned.'; });
+          if (mounted) setState(() { _scanning = false; _statusText = 'All IPs already scanned.'; });
           _showSnack('No new IPs. Go to History → Reset to start fresh.');
           return;
         }
         if (_cancelled) {
-          setState(() { _scanning = false; _statusText = 'Cancelled.'; });
+          if (mounted) setState(() { _scanning = false; _statusText = 'Cancelled.'; });
           return;
         }
         _runFastRangeScan(sampledIps);
       } catch (e) {
-        setState(() { _scanning = false; _statusText = 'Error: $e'; });
+        if (mounted) setState(() { _scanning = false; _statusText = 'Error: $e'; });
         _showSnack('Error: $e');
       }
       return;
@@ -2444,13 +2444,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _resetDns() async {
     if (!Platform.isWindows) return;
-    setState(() { _applyingDns = true; _applyDnsError = null; });
+    if (mounted) setState(() { _applyingDns = true; _applyDnsError = null; });
     try {
       final ifResult = await Process.run(
         'netsh', ['interface', 'show', 'interface'], runInShell: true);
       final activeIface = _parseActiveInterface(ifResult.stdout.toString());
       if (activeIface == null) {
-        setState(() { _applyingDns = false; });
+        if (mounted) setState(() { _applyingDns = false; });
         return;
       }
       await Process.run(
@@ -2458,7 +2458,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         runInShell: true,
       );
       _stopDnsMonitor();
-      setState(() {
+      if (mounted) setState(() {
         _appliedDnsIp  = null;
         _appliedDns2Ip = null;
         _applyingDns   = false;
@@ -2473,7 +2473,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _dnsMonLatHistory.clear();
       });
     } catch (e) {
-      setState(() { _applyingDns = false; _applyDnsError = 'Error: $e'; });
+      if (mounted) setState(() { _applyingDns = false; _applyDnsError = 'Error: $e'; });
     }
   }
 
