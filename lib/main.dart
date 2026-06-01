@@ -2367,11 +2367,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ],
                   )
                 else
-                  Text(
-                    r.validation.error.isNotEmpty ? r.validation.error : 'validation failed',
-                    style: GoogleFonts.inter(color: const Color(0xFFFF5252), fontSize: 11),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                  GestureDetector(
+                    onTap: () {
+                      // Tap to copy full error to clipboard
+                      final fullErr = r.validation.error.isNotEmpty
+                          ? r.validation.error
+                          : 'validation failed';
+                      Clipboard.setData(ClipboardData(text: fullErr));
+                      _showSnack('Error copied');
+                    },
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          r.validation.error.isNotEmpty ? r.validation.error : 'validation failed',
+                          style: GoogleFonts.robotoMono(color: const Color(0xFFFF5252), fontSize: 10),
+                          maxLines: 6,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text('tap to copy full log',
+                            style: GoogleFonts.inter(color: const Color(0xFF888888), fontSize: 9)),
+                      ],
+                    ),
                   ),
               ],
             ),
