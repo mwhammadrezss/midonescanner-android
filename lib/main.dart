@@ -536,8 +536,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     // ── CDN mode ─────────────────────────────────────────────────────────────
-    final ips = validateAndExtractIps(_ipController.text);
-    if (ips.isEmpty) { _showSnack('No valid IPs found!'); return; }
+    // FIX: Support CIDR input (e.g. 104.16.0.0/24) — expand to individual IPs
+    final ips = _expandCidrOrIps(_ipController.text);
+    if (ips.isEmpty) { _showSnack('No valid IPs found! Check your input.'); return; }
+    // Safety limit to prevent memory issues with huge CIDRs
+    if (ips.length > 50000) { _showSnack('Too many IPs (${ips.length}). Max 50,000.'); return; }
     if (_cdnSubMode == CdnSubMode.deep) {
       _showSniPickerDialog(ips);
       return;
