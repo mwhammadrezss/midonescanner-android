@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
+import android.content.pm.ServiceInfo
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import java.io.FileInputStream
@@ -42,8 +43,8 @@ class DnsVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private val running      = AtomicBoolean(false)
     private var tunnelThread: Thread? = null
-    // Thread pool: هر DNS query موازی handle می‌شه
-    private val dnsPool = Executors.newFixedThreadPool(8)
+    // Thread pool: هر DNS query موازی handle می‌شه (var تا بتونیم restart کنیم)
+    @Volatile private var dnsPool = Executors.newFixedThreadPool(8)
 
     // ── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -77,7 +78,7 @@ class DnsVpnService : VpnService() {
         // ════════════════════════════════════════════════════════════════════
         val builder = Builder()
             .setSession("MidONe DNS")
-            .addAddress("10.111.222.1", 32)
+            .addAddress("10.111.222.1", 30)
             .setMtu(1500)
             .addDnsServer(dns1)
             .addRoute(dns1, 32)           // فقط dns1 IP از TUN رد بشه
@@ -101,6 +102,8 @@ class DnsVpnService : VpnService() {
         broadcastStatus(true)
         startForegroundNotif()
 
+        // recreate pool if previous run shut it down
+        if (dnsPool.isShutdown) dnsPool = Executors.newFixedThreadPool(8)
         tunnelThread = Thread({ runTunnel(dns1, dns2) }, "dns-vpn-tunnel").also { it.start() }
         Log.i(TAG, "VPN started — DNS1=$dns1 DNS2=$dns2")
     }
@@ -286,7 +289,12 @@ class DnsVpnService : VpnService() {
             .setOngoing(true)
             .build()
 
-        startForeground(NOTIF_ID, notif)
+        // Android 14+ requires type parameter for specialUse foreground service
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NOTIF_ID, notif)
+        }
     }
 
     // ── Broadcast ─────────────────────────────────────────────────────────
