@@ -797,7 +797,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _prefilterTotal = totalCount;
           _prefiltering   = false;
           _total          = liveCount;
-          _done           = 0;
+          // FIX(prefilter-reset): do NOT reset _done here.
+          // onPrefilterDone now fires once after ALL workers; by that point
+          // many _WorkerBatch callbacks may have already incremented _done.
+          // Resetting to 0 caused the "1000 IPs, 0 done" display bug.
           _statusText     = 'Scanning $liveCount live IPs...';
         });
       },
@@ -808,8 +811,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         // setState immediately so progress bar updates on every IP
         setState(() {
           _done = done;
-          // Do NOT overwrite _total from onProgress — prefilter count is the stable source
-          if (_total == 0 || total < _total) _total = total;
+          // FIX(total-shrink): only set _total from onProgress if not yet initialised.
+          // prefilter count is the stable source of truth; never shrink it.
+          if (_total == 0) _total = total;
           if (done > 0 && _total > 0) {
             final pct = (done / _total * 100).round();
             _statusText = 'Scanning $pct%...';
