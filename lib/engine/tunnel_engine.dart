@@ -206,8 +206,18 @@ Future<SurvivalResult> tunnelSurvivalTest(
       }).ignore();
     }
 
-    // ── Blackhole detection: stalled socket ─────────────────────────────────
-    final stallTimeout = Duration(milliseconds: survivalTargetMs + 8000);
+    // ── Early blackhole detection: if no activity within 5s, bail out ──────
+    Future.delayed(const Duration(milliseconds: 5000), () {
+      if (!deathCompleter.isCompleted && !connectionDead && !hadErrors) {
+        // No data, no error, no heartbeat response — likely a blackhole
+        blackhole = true;
+        connectionDead = true;
+        if (!deathCompleter.isCompleted) deathCompleter.complete();
+      }
+    }).ignore();
+
+    // ── Blackhole detection: stalled socket (tightened: +4000 instead of +8000)
+    final stallTimeout = Duration(milliseconds: survivalTargetMs + 4000);
 
     await Future.any([
       Future.delayed(Duration(milliseconds: survivalTargetMs)),

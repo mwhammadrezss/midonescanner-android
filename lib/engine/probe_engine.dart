@@ -130,21 +130,21 @@ Future<({double latencyMs, int retransmits, ProbeTimings? timings})?> androidTls
 
 // p4: smartRetryBackoff — exponential jitter retry
 // cf-sni-rotation: if sniRotation=true, each retry cycles through kCfSniHostnames
-// UPGRADED: watchdog wraps each androidTlsProbe call to kill hung sockets
+// OPTIMIZED: reduced retries 3→2, watchdog 10s→6s, backoff 300→200 cap 2000→1000
 Future<({double latencyMs, int retransmits, ProbeTimings? timings, String sniUsed})?> probeWithRetry(
   String ip, {
   String sni         = kShiroSni,
-  int    retries     = 3,
+  int    retries     = 2,
   bool   sniRotation = false,
 }) async {
   for (int i = 0; i < retries; i++) {
     final effectiveSni = (sniRotation && kCfSniHostnames.isNotEmpty)
         ? kCfSniHostnames[i % kCfSniHostnames.length]
         : sni;
-    // UPGRADED: watchdog ensures hung sockets are killed within 16s
+    // Watchdog: kill hung sockets within 6s (was 10s)
     final r = await withWatchdog(
       fn: () => androidTlsProbe(ip, sni: effectiveSni),
-      timeout: const Duration(seconds: 10),
+      timeout: const Duration(seconds: 6),
       fallback: null,
     );
     if (r != null) {
@@ -156,9 +156,9 @@ Future<({double latencyMs, int retransmits, ProbeTimings? timings, String sniUse
       );
     }
     if (i < retries - 1) {
-      final baseMs   = (300 * pow(2, i)).toInt();
-      final jitterMs = _probeRng.nextInt(200);
-      final delayMs  = (baseMs + jitterMs).clamp(200, 2000);
+      final baseMs   = (200 * pow(2, i)).toInt();
+      final jitterMs = _probeRng.nextInt(150);
+      final delayMs  = (baseMs + jitterMs).clamp(150, 1000);
       await Future.delayed(Duration(milliseconds: delayMs));
     }
   }

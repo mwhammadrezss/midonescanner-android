@@ -28,9 +28,9 @@ const shiroSni = kShiroSni;
 
 enum ScanMode { normal, deep }
 
-// Survival targets
-const _survivalNormal = 12000;
-const _survivalDeep   = 15000;
+// Survival targets (optimized: reduced for faster scanning on mobile/censored networks)
+const _survivalNormal = 10000;
+const _survivalDeep   = 12000;
 
 // ─── scanOneIp ───────────────────────────────────────────────────────────────
 Future<ScanResult> scanOneIp(
