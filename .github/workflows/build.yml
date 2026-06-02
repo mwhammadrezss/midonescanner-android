@@ -51,33 +51,12 @@ jobs:
       - name: 📦 Get packages
         run: flutter pub get
 
-      - name: 📥 Download xray-core for Android (arm64)
+      - name: 📁 Ensure assets/xray dir exists
         run: |
           mkdir -p assets/xray
-          XRAY_URL="https://github.com/XTLS/Xray-core/releases/latest/download/Xray-android-arm64-v8a.zip"
-          echo "⬇️ Downloading xray for Android arm64..."
-          wget -q -O xray-android.zip "$XRAY_URL" \
-            || curl -sL -o xray-android.zip "$XRAY_URL"
-          unzip -q xray-android.zip -d xray_android_tmp
-          if [ -f "xray_android_tmp/xray" ]; then
-            cp xray_android_tmp/xray assets/xray/xray-arm64
-            chmod +x assets/xray/xray-arm64
-            SIZE=$(du -sh assets/xray/xray-arm64 | cut -f1)
-            echo "✅ xray-arm64 bundled ($SIZE)"
-          else
-            echo "❌ xray binary not found in archive — listing contents:"
-            ls -la xray_android_tmp/
-            exit 1
-          fi
-          # Bundle geoip.dat and geosite.dat (required by xray at runtime)
-          GEOIP_URL="https://github.com/XTLS/Xray-core/releases/latest/download/geoip.dat"
-          GEOSITE_URL="https://github.com/XTLS/Xray-core/releases/latest/download/geosite.dat"
-          wget -q -O assets/xray/geoip.dat "$GEOIP_URL" || curl -sL -o assets/xray/geoip.dat "$GEOIP_URL"
-          wget -q -O assets/xray/geosite.dat "$GEOSITE_URL" || curl -sL -o assets/xray/geosite.dat "$GEOSITE_URL"
-          GIP_SIZE=$(du -sh assets/xray/geoip.dat | cut -f1)
-          GST_SIZE=$(du -sh assets/xray/geosite.dat | cut -f1)
-          echo "✅ geoip.dat bundled ($GIP_SIZE) | geosite.dat bundled ($GST_SIZE)"
-          rm -rf xray-android.zip xray_android_tmp
+          echo "✅ assets/xray ready (xray binary not bundled — TLS-only mode)"
+          # xray binary is NOT used — xray_validator.dart uses TLS check only.
+          # Removed: xray-arm64 (35MB) + geoip.dat + geosite.dat → saves ~12MB APK
 
       - name: 🔨 Build APK
         run: flutter build apk --release --no-shrink
