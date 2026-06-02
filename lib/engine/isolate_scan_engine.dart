@@ -201,7 +201,7 @@ Future<void> _workerMain(_WorkerConfig config) async {
     final results = <ScanResult>[];
 
     // ── Prefilter: fast TCP ─────────────────────────────────────────────────
-    final fastProbe = FastProbeEngine(defaultTimeoutMs: 3000);
+    final fastProbe = FastProbeEngine(defaultTimeoutMs: 2000);
     final prefilterSem = Semaphore(config.prefilterConcurrency);
 
     final liveRaw = await Future.wait(config.ips.map((ip) async {
@@ -210,7 +210,7 @@ Future<void> _workerMain(_WorkerConfig config) async {
       await prefilterSem.acquire();
       try {
         if (_localCancelled) return null;
-        final r = await fastProbe.probe(ip, timeoutMs: 3000);
+        final r = await fastProbe.probe(ip, timeoutMs: 2000);
         if (!r.alive) {
           try { SoftBlacklist().recordFailure(ip); } catch (_) {}
           try { SubnetMemoryCache().recordFailure(ip); } catch (_) {}
