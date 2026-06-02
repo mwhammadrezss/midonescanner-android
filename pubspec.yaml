@@ -1,7 +1,7 @@
 name: midone_scanner
 description: MidONe Scanner SK - Shir Khorshid CDN IP Scanner
 publish_to: 'none'
-version: 7.4.1+11
+version: 7.4.2+12
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
