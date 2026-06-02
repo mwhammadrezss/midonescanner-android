@@ -306,6 +306,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String? _customCidrError;
   // ── Imported IPs (from txt file) ─────────────────────────────────────────
   List<String> _importedIps = [];
+  String _importedIpsProvider = 'cloudflare'; // 'cloudflare' or 'akamai'
 
   // ── Saved custom CIDRs (persistent) ─────────────────────────────────────
   List<String> _savedCidrs = [];
@@ -502,7 +503,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _cancelled = false;
           _statusText = 'Scanning ${_importedIps.length} imported IPs...';
         });
-        _runFastRangeScan(List<String>.from(_importedIps));
+        _runScan(
+          List<String>.from(_importedIps),
+          null,
+          isRangeScan: true,
+          rangeCfMode: _importedIpsProvider == 'cloudflare',
+        );
         return;
       }
 
@@ -3892,6 +3898,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       const SizedBox(width: 6),
                       Text('${_importedIps.length} IP آماده اسکن',
                           style: GoogleFonts.inter(color: const Color(0xFF00E5FF), fontSize: 12, fontWeight: FontWeight.w700)),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: _showImportedIpsProviderSheet,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFC6F135).withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: const Color(0xFFC6F135).withOpacity(0.45),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _importedIpsProvider == 'cloudflare' ? '☁️ Cloudflare' : '🌐 Akamai',
+                                style: GoogleFonts.inter(
+                                  color: const Color(0xFFC6F135),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(width: 3),
+                              const Icon(Icons.edit_rounded, color: Color(0xFFC6F135), size: 10),
+                            ],
+                          ),
+                        ),
+                      ),
                       const Spacer(),
                       GestureDetector(
                         onTap: () => setState(() => _importedIps.clear()),
@@ -4248,11 +4283,164 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       if (!mounted) return;
       setState(() => _importedIps = ips);
-      _showSnack('✅ ${ips.length} IP ایمپورت شد — استارت بزن.');
+      _showImportedIpsProviderSheet();
     } catch (e) {
       if (!mounted) return;
       _showSnack('❌ خطا: ${e.toString()}');
     }
+  }
+
+  void _showImportedIpsProviderSheet() {
+    String selected = _importedIpsProvider;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF112216),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Directionality(
+              textDirection: TextDirection.rtl,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'انتخاب CDN Provider',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.inter(
+                        color: const Color(0xFFFFFFFF),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'برای اسکن IPهای ایمپورت‌شده یک پروایدر انتخاب کن',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.inter(
+                        color: const Color(0xFF8A9E8E),
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setSheetState(() => selected = 'cloudflare'),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              padding: const EdgeInsets.symmetric(vertical: 18),
+                              decoration: BoxDecoration(
+                                color: selected == 'cloudflare'
+                                    ? const Color(0xFFC6F135).withOpacity(0.10)
+                                    : const Color(0xFF0D1A11),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: selected == 'cloudflare'
+                                      ? const Color(0xFFC6F135)
+                                      : const Color(0xFF2A4A30),
+                                  width: selected == 'cloudflare' ? 2 : 1,
+                                ),
+                              ),
+                              child: Column(
+                                children: [
+                                  const Text('☁️', style: TextStyle(fontSize: 28)),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Cloudflare',
+                                    style: GoogleFonts.inter(
+                                      color: selected == 'cloudflare'
+                                          ? const Color(0xFFC6F135)
+                                          : const Color(0xFFFFFFFF),
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setSheetState(() => selected = 'akamai'),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              padding: const EdgeInsets.symmetric(vertical: 18),
+                              decoration: BoxDecoration(
+                                color: selected == 'akamai'
+                                    ? const Color(0xFFC6F135).withOpacity(0.10)
+                                    : const Color(0xFF0D1A11),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: selected == 'akamai'
+                                      ? const Color(0xFFC6F135)
+                                      : const Color(0xFF2A4A30),
+                                  width: selected == 'akamai' ? 2 : 1,
+                                ),
+                              ),
+                              child: Column(
+                                children: [
+                                  const Text('🌐', style: TextStyle(fontSize: 28)),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Akamai',
+                                    style: GoogleFonts.inter(
+                                      color: selected == 'akamai'
+                                          ? const Color(0xFFC6F135)
+                                          : const Color(0xFFFFFFFF),
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    GestureDetector(
+                      onTap: () {
+                        setState(() => _importedIpsProvider = selected);
+                        Navigator.pop(ctx);
+                        _showSnack(
+                          '✅ ${_importedIps.length} IP ایمپورت شد — پروایدر: ${selected == "cloudflare" ? "Cloudflare" : "Akamai"} — استارت بزن.',
+                        );
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFC6F135),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          'تأیید',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.inter(
+                            color: const Color(0xFF0A1A0F),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   void _loadRangeCidrs() {
