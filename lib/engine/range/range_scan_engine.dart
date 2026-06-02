@@ -16,6 +16,7 @@ import 'worker_pool.dart';
 import 'isolate_pool_manager.dart';
 import 'deep_scan_bridge.dart';
 import 'subnet_sampler.dart';
+import 'cidr_provider_service.dart';
 import '../../models/scan_result.dart';
 import '../../geo/geoip.dart';
 
@@ -93,10 +94,12 @@ class RangeScanEngine {
     required String cidr,
     required RangeScanMode mode,
     int? concurrencyOverride,
+    RangeCdnProvider? provider,
     bool Function()? isCancelled,
     void Function(RangeScanStats)? onStatsUpdate,
   }) async {
     final cancelCheck = isCancelled ?? () => false;
+    final isCfScan = provider == RangeCdnProvider.cloudflare;
 
     // 1. Init
     _stats.reset();
@@ -208,6 +211,7 @@ class RangeScanEngine {
       candidates.map((r) => r.ip).toList(),
       deepMode: deepMode,
       concurrency: deepConcurrency,
+      isCfScan: isCfScan,
       isCancelled: () => cancelCheck() || _cancelled,
       onResult: (scanResult) {
         if (cancelCheck() || _cancelled) return;
@@ -265,6 +269,7 @@ class RangeScanEngine {
     required List<String> cidrs,
     required RangeScanMode mode,
     int? concurrencyOverride,
+    RangeCdnProvider? provider,
     bool Function()? isCancelled,
     void Function(RangeScanStats)? onStatsUpdate,
   }) async {
@@ -274,6 +279,7 @@ class RangeScanEngine {
         cidr: cidr,
         mode: mode,
         concurrencyOverride: concurrencyOverride,
+        provider: provider,
         isCancelled: isCancelled,
         onStatsUpdate: onStatsUpdate,
       );
