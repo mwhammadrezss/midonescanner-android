@@ -95,6 +95,12 @@ class _WorkerConfig {
   });
 }
 
+class _WorkerPrefilterDone {
+  final int liveCount;
+  final int totalCount;
+  const _WorkerPrefilterDone(this.liveCount, this.totalCount);
+}
+
 class _WorkerProgress {
   final int done;
   final int total;
@@ -129,86 +135,113 @@ class _SubnetEntry {
 // ─── Worker Isolate entry point ───────────────────────────────────────────────
 
 Future<void> _workerMain(_WorkerConfig config) async {
-  // Initialize GeoIP in this isolate from pre-loaded bytes
-  if (config.geoipBytes != null) {
-    GeoIPOffline().initWithBytes(config.geoipBytes!);
-  }
-
-  final results = <ScanResult>[];
-  int done = 0;
-
-  // ── Prefilter: fast TCP ───────────────────────────────────────────────────
-  final fastProbe = FastProbeEngine(defaultTimeoutMs: 3000);
-  final prefilterSem = Semaphore(config.prefilterConcurrency);
-
-  final liveResults = await Future.wait(config.ips.map((ip) async {
-    await prefilterSem.acquire();
-    try {
-      final r = await fastProbe.probe(ip, timeoutMs: 3000);
-      if (!r.alive) {
-        SoftBlacklist().recordFailure(ip);
-        SubnetMemoryCache().recordFailure(ip);
+  try {
+    // Initialize GeoIP in this isolate from pre-loaded bytes
+    if (config.geoipBytes != null) {
+      try {
+        GeoIPOffline().initWithBytes(config.geoipBytes!);
+      } catch (e) {
+        // GeoIP init failed — continue without geo data
       }
-      return r.alive ? ip : null;
-    } finally {
-      prefilterSem.release();
     }
-  }));
-  final liveIps = liveResults.whereType<String>().toList();
 
-  if (liveIps.isEmpty) {
+    final results = <ScanResult>[];
+    int done = 0;
+
+    // ── Prefilter: fast TCP ─────────────────────────────────────────────────
+    final fastProbe = FastProbeEngine(defaultTimeoutMs: 3000);
+    final prefilterSem = Semaphore(config.prefilterConcurrency);
+
+    final liveResults = await Future.wait(config.ips.map((ip) async {
+      await prefilterSem.acquire();
+      try {
+        final r = await fastProbe.probe(ip, timeoutMs: 3000);
+        if (!r.alive) {
+          try { SoftBlacklist().recordFailure(ip); } catch (_) {}
+          try { SubnetMemoryCache().recordFailure(ip); } catch (_) {}
+        }
+        return r.alive ? ip : null;
+      } catch (_) {
+        return null;
+      } finally {
+        prefilterSem.release();
+      }
+    }));
+    final liveIps = liveResults.whereType<String>().toList();
+
+    // Report prefilter completion to main isolate
+    config.replyPort.send(_WorkerPrefilterDone(liveIps.length, config.ips.length));
+
+    if (liveIps.isEmpty) {
+      config.replyPort.send(_WorkerResult(
+        results: [],
+        workerIndex: -1,
+        blacklistFails: {},
+        subnetCache: {},
+      ));
+      return;
+    }
+
+    // ── Full scan ───────────────────────────────────────────────────────────
+    final adaptiveCtrl = AdaptiveConcurrencyController();
+    adaptiveCtrl.seed(config.concurrency);
+    final scanSem = Semaphore(config.concurrency);
+    final total = liveIps.length;
+
+    bool _localCancelled = false;
+
+    await Future.wait(liveIps.map((ip) async {
+      if (_localCancelled) return;
+      await scanSem.acquire();
+      try {
+        if (_localCancelled) return;
+        final r = await scanOneIp(
+          ip,
+          mode: config.mode,
+          snis: config.deepSnis,
+          normalSniOverride: config.normalSniOverride,
+          isCfScan: config.isCfScan,
+          isCancelled: () => _localCancelled,
+        );
+        results.add(r);
+        done++;
+        config.replyPort.send(_WorkerProgress(done, total, r, -1));
+        if (r.isAlive) adaptiveCtrl.recordSuccess();
+        else           adaptiveCtrl.recordError();
+      } catch (_) {
+        // Individual IP scan failed — skip and continue
+        done++;
+        config.replyPort.send(_WorkerProgress(done, total, ScanResult(
+          ip: ip, latencyMs: 9999, jitterMs: 0, isAlive: false,
+          grade: 'F', country: '', flag: '', loss: 100, reliability: 0,
+          score: 0, survivalMs: 0, retransmits: 0,
+          phase: ScanPhase.tlsFail, tier: IpTier.dead,
+        ), -1));
+      } finally {
+        scanSem.release();
+      }
+    }));
+
+    // ── Collect shared state to send back ───────────────────────────────────
+    final Map<String, int> blfails = {};
+    final Map<String, _SubnetEntry> scache = {};
+
+    config.replyPort.send(_WorkerResult(
+      results: results,
+      workerIndex: -1,
+      blacklistFails: blfails,
+      subnetCache: scache,
+    ));
+  } catch (e) {
+    // CRITICAL: If anything goes wrong, ALWAYS send _WorkerResult
+    // so the main isolate doesn't hang forever waiting.
     config.replyPort.send(_WorkerResult(
       results: [],
       workerIndex: -1,
       blacklistFails: {},
       subnetCache: {},
     ));
-    return;
   }
-
-  // ── Full scan ─────────────────────────────────────────────────────────────
-  final adaptiveCtrl = AdaptiveConcurrencyController();
-  adaptiveCtrl.seed(config.concurrency);
-  final scanSem = Semaphore(config.concurrency);
-  final total = liveIps.length;
-
-  bool _localCancelled = false;
-
-  await Future.wait(liveIps.map((ip) async {
-    if (_localCancelled) return;
-    await scanSem.acquire();
-    try {
-      if (_localCancelled) return;
-      final r = await scanOneIp(
-        ip,
-        mode: config.mode,
-        snis: config.deepSnis,
-        normalSniOverride: config.normalSniOverride,
-        isCfScan: config.isCfScan,
-        isCancelled: () => _localCancelled,
-      );
-      results.add(r);
-      done++;
-      config.replyPort.send(_WorkerProgress(done, total, r, -1));
-      if (r.isAlive) adaptiveCtrl.recordSuccess();
-      else           adaptiveCtrl.recordError();
-    } finally {
-      scanSem.release();
-    }
-  }));
-
-  // ── Collect shared state to send back ─────────────────────────────────────
-  // Soft blacklist
-  final Map<String, int> blfails = {};
-  // SubnetCache — we send back what we learned
-  final Map<String, _SubnetEntry> scache = {};
-
-  config.replyPort.send(_WorkerResult(
-    results: results,
-    workerIndex: -1,
-    blacklistFails: blfails,
-    subnetCache: scache,
-  ));
 }
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
@@ -247,6 +280,7 @@ Future<List<ScanResult>> runIsolateScanEngine(
   final totalIps = ips.length;
   int totalDone = 0;
   int totalLive = 0;
+  int prefiltersDone = 0;
   bool prefilterReported = false;
 
   final allResults = <ScanResult>[];
@@ -270,41 +304,75 @@ Future<List<ScanResult>> runIsolateScanEngine(
       geoipBytes: geoBytes,
     );
 
+    bool workerFinished = false;
     receivePort.listen((msg) {
       if (cancelCheck()) {
-        receivePort.close();
-        workersRemaining--;
-        if (workersRemaining <= 0 && !completer.isCompleted) completer.complete();
+        if (!workerFinished) {
+          workerFinished = true;
+          receivePort.close();
+          workersRemaining--;
+          if (workersRemaining <= 0 && !completer.isCompleted) completer.complete();
+        }
         return;
       }
 
-      if (msg is _WorkerProgress) {
+      if (msg is _WorkerPrefilterDone) {
+        totalLive += msg.liveCount;
+        prefiltersDone++;
+        // Report once ALL workers have completed prefilter
+        if (!prefilterReported && prefiltersDone >= chunks.length) {
+          prefilterReported = true;
+          onPrefilterDone?.call(totalLive, totalIps);
+        }
+      } else if (msg is _WorkerProgress) {
         totalDone++;
-        onProgress?.call(totalDone, totalIps, msg.result);
+        // Use totalLive (post-prefilter count) not totalIps for accurate progress
+        onProgress?.call(totalDone, totalLive > 0 ? totalLive : totalIps, msg.result);
       } else if (msg is _WorkerResult) {
         allResults.addAll(msg.results);
-        totalLive += msg.results.where((r) => r.isAlive).length;
 
-        // Merge subnet cache back
-        // (simplified — in practice SubnetMemoryCache records are immutable wins)
+        if (!workerFinished) {
+          workerFinished = true;
+          receivePort.close();
+          workersRemaining--;
 
-        receivePort.close();
+          if (workersRemaining <= 0 && !completer.isCompleted) {
+            completer.complete();
+          }
+        }
+      } else if (msg == null) {
+        // null = isolate exited (onExit signal)
+        if (!workerFinished) {
+          workerFinished = true;
+          receivePort.close();
+          workersRemaining--;
+          if (workersRemaining <= 0 && !completer.isCompleted) completer.complete();
+        }
+      } else if (msg is List) {
+        // List = isolate uncaught error [errorString, stackTraceString]
+        if (!workerFinished) {
+          workerFinished = true;
+          receivePort.close();
+          workersRemaining--;
+          if (workersRemaining <= 0 && !completer.isCompleted) completer.complete();
+        }
+      }
+    }, onDone: () {
+      // ReceivePort closed — isolate exited
+      if (!workerFinished) {
+        workerFinished = true;
         workersRemaining--;
-
-        if (!prefilterReported) {
-          prefilterReported = true;
-          final liveCount = allResults.length;
-          onPrefilterDone?.call(liveCount, totalIps);
-        }
-
-        if (workersRemaining <= 0 && !completer.isCompleted) {
-          completer.complete();
-        }
+        if (workersRemaining <= 0 && !completer.isCompleted) completer.complete();
       }
     });
 
     try {
-      await Isolate.spawn(_workerMain, config);
+      await Isolate.spawn(
+        _workerMain,
+        config,
+        onError: receivePort.sendPort,  // Catch uncaught isolate errors
+        onExit: receivePort.sendPort,   // Detect isolate exit
+      );
     } catch (e) {
       // Isolate spawn failed — close port
       receivePort.close();
