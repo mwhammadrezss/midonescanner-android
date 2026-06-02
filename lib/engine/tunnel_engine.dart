@@ -15,7 +15,13 @@
 // p14: fakeIdlePattern — occasional silence between heartbeats
 // p15: adaptiveHeartbeatInterval — interval adapts to connection stability
 // p16: dpiSuspicionScore — probability score instead of boolean
-// OPTIMIZED: stallTimeout survivalTargetMs+8000→+4000, added early blackhole detection at 5s
+//
+// BUGFIX v7.3.0:
+//   - FIX #1: Removed premature 5s blackhole timer that was killing ALL healthy
+//             connections (heartbeat first fires at 3-7s, so the 5s timer always
+//             fired first → every IP got survivalMs≈5000 → usable tier regardless)
+//   - FIX #2: Blackhole is now detected only when deathCompleter hasn't resolved
+//             after survivalTargetMs + 4000ms stall (original stall guard kept)
 
 import 'dart:async';
 import 'dart:io';
@@ -107,6 +113,10 @@ Future<SurvivalResult> tunnelSurvivalTest(
   bool          errorKilled = false;
   bool          blackhole   = false;
   bool          hadErrors   = false;
+  // FIX #1: track whether at least one heartbeat was successfully sent.
+  // The stall-guard must NOT fire before the first heartbeat goes out
+  // (heartbeat delay = 3–7s, so a 5s timer always fires first → false blackhole).
+  bool          heartbeatSent = false;
 
   try {
     rawSock = await Socket.connect(
@@ -179,6 +189,8 @@ Future<SurvivalResult> tunnelSurvivalTest(
           }
 
           await tlsRef.flush();
+          // FIX #1: mark that at least one heartbeat made it through
+          heartbeatSent = true;
         } catch (_) {
           errorKilled    = true;
           connectionDead = true;
@@ -203,18 +215,32 @@ Future<SurvivalResult> tunnelSurvivalTest(
       }).ignore();
     }
 
-    // ── Early blackhole detection: if no activity within 5s, bail out ──────
-    Future.delayed(const Duration(milliseconds: 5000), () {
-      if (!deathCompleter.isCompleted && !connectionDead && !hadErrors) {
-        // No data, no error, no heartbeat response — likely a blackhole
-        blackhole = true;
+    // ── FIX #1: Blackhole detection — only after heartbeat has been sent ────
+    // Old code fired at t=5s unconditionally, killing every healthy connection
+    // because the first heartbeat fires at t=3–7s (after the 5s timer).
+    // New logic: poll every 500ms; only trigger blackhole if:
+    //   (a) no heartbeat has been sent yet AND
+    //   (b) we're past the max possible first heartbeat window (3s base +
+    //       optional 5s fake-idle = 13s max before first send).
+    //   This gives the heartbeat loop enough time to fire at least once.
+    //
+    // In practice a true blackhole (IP accepts TCP/TLS but never responds and
+    // the OS doesn't RST) will still be caught by the stall guard below.
+    const _maxFirstHeartbeatMs = 14000; // 7s delay + 5s fake-idle + 2s margin
+    Future.doWhile(() async {
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (deathCompleter.isCompleted || connectionDead) return false;
+      if (!heartbeatSent && sw.elapsedMilliseconds > _maxFirstHeartbeatMs) {
+        // Heartbeat never fired — genuine blackhole / frozen socket
+        blackhole      = true;
         connectionDead = true;
         if (!deathCompleter.isCompleted) deathCompleter.complete();
+        return false;
       }
+      return true;
     }).ignore();
 
-    // ── Blackhole detection: stalled socket ─────────────────────────────────
-    // OPTIMIZED: stallTimeout +8000→+4000 (reduces total hang time)
+    // ── Stall guard: if deathCompleter never resolves within target+4s ──────
     final stallTimeout = Duration(milliseconds: survivalTargetMs + 4000);
 
     await Future.any([
@@ -226,7 +252,7 @@ Future<SurvivalResult> tunnelSurvivalTest(
     }).catchError((_) {});
 
     sw.stop();
-    connectionDead = true; // set before sub.cancel() to stop heartbeat loop immediately
+    connectionDead = true; // stop heartbeat loop
     await sub.cancel();
     try { await tls.close(); } catch (_) {}
     tls.destroy();
