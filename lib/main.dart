@@ -277,6 +277,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _applyingDns2 = false;
   String? _applyDnsError;
   String? _applyDnsMessage;
+
+  // ── DNS VPN (Android) state ───────────────────────────────────────────────
+  static const _dnsVpnChannel = MethodChannel('org.mmdrlx.midone_scanner/dns_vpn');
+  bool _dnsVpnRunning = false;
+  String? _dnsVpnActiveDns1;
+  String? _dnsVpnActiveDns2;
+  bool _dnsVpnStarting = false;
+  // Manual DNS input
+  final _manualDns1Controller = TextEditingController();
+  final _manualDns2Controller = TextEditingController();
+  bool _showManualDnsInput = false;
   Timer? _dnsMonitorTimer;
   double? _dnsMonLat;
   double? _dnsMonJitter;
@@ -343,6 +354,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _ipController.dispose();
     _cfConfigController.dispose();
     _customCidrController.dispose();
+    _manualDns1Controller.dispose();
+    _manualDns2Controller.dispose();
     _dnsScanSubscription?.cancel();
     _dnsMonitorTimer?.cancel();
     super.dispose();
@@ -3116,14 +3129,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               )
             else
-              ..._dnsResults!.asMap().entries.map((e) =>
-                  _DnsResultCard(server: e.value)),
-            // ── Apply DNS — appears RIGHT AFTER results list ──────────────
+              // ── Android: only show alive servers (eliminated == false) ──
+              ..._dnsResults!
+                  .where((s) => !s.eliminated)
+                  .toList()
+                  .asMap()
+                  .entries
+                  .map((e) => _DnsResultCard(server: e.value)),
+            // ── Apply DNS — Windows ───────────────────────────────────────
             if (Platform.isWindows && _dnsResults!.isNotEmpty) ...[
               const SizedBox(height: 16),
               _buildApplyDnsSection(),
             ],
-            // DNS Status Monitor panel (shows after Apply pressed)
+            // DNS Status Monitor panel (shows after Windows Apply)
             if (_appliedDnsIp != null) ...[
               _buildDnsStatusPanel(),
             ],
@@ -3139,6 +3157,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 child: Text(_applyDnsError!,
                     style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
               ),
+            // ── Apply DNS — Android (VPN) ─────────────────────────────────
+            if (Platform.isAndroid && _dnsResults != null && _dnsResults!.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _buildAndroidApplyDnsSection(),
+            ],
           ] else if (!_dnsScanning) ...[
             const SizedBox(height: 16),
             Center(
