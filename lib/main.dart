@@ -473,6 +473,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _startScan() async {
+    // FIX BUG#3: Guard against overlapping scans
+    if (_scanning) return;
+
     // ── Range mode ──────────────────────────────────────────────────────────
     // Dispatch to correct handler
     if (_activeScanTab == ScanTab.cloudflare) { _startCfScan(); return; }
@@ -800,7 +803,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           }
         }
       },
-      isCancelled: () => _cancelled || _paused,
+      // FIX BUG#1: _paused must NOT kill isolates — only _cancelled should.
+      // Pause is handled at the batch-timer/UI level; isolates keep scanning.
+      isCancelled: () => _cancelled,
     ).then((results) {
       if (!mounted) return;
       _stopBatchTimer();
