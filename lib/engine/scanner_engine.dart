@@ -43,7 +43,7 @@ const shiroSni = kShiroSni;
 enum ScanMode { normal, deep }
 
 // Survival targets — OPTIMIZED: reduced for faster scan cycles
-const _survivalNormal = 10000;  // was 12000
+const _survivalNormal = 6000;   // was 10000 — OPTIMIZED: 40% faster scan
 const _survivalDeep   = 12000;  // was 15000
 
 // ─── scanOneIp ───────────────────────────────────────────────────────────────
@@ -173,7 +173,7 @@ Future<ScanResult> _scanWithSni(
 }) async {
   StructuredLogger().log(phase: 'probe_start', ip: ip, sni: sni);
 
-  final first = await probeWithRetry(ip, sni: sni, retries: 2, sniRotation: runCfProbe);
+  final first = await probeWithRetry(ip, sni: sni, retries: 1, sniRotation: runCfProbe);
   if (first == null) {
     StructuredLogger()
         .log(phase: 'probe_fail', ip: ip, sni: sni, error: 'TLS fail');
@@ -289,8 +289,7 @@ Future<ScanResult> _scanWithSni(
   // in the Cloudflare family; this gives a real download measurement.
   double? speedKBs;
   if (tier == IpTier.excellent ||
-      tier == IpTier.good ||
-      tier == IpTier.usable) {
+      tier == IpTier.good) {   // OPTIMIZED: skip BW test for usable tier
     final bwSni = kSniCloudflareFamily.contains(effectiveSni)
         ? effectiveSni
         : 'speed.cloudflare.com';
