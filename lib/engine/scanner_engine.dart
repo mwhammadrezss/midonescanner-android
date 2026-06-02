@@ -7,6 +7,17 @@
 // OPTIMIZED:
 //   - _survivalNormal: 12000 → 10000 (faster scan cycle)
 //   - _survivalDeep:   15000 → 12000 (faster deep scan cycle)
+//
+// BUGFIX v7.3.0:
+//   - FIX #2: isAlive now correctly tied to survival.survived — not just tier.
+//             Before: any IP with tier >= usable (survivalMs > 0 after fake
+//             blackhole kill) was marked isAlive=true. Now: must have
+//             survived the full tunnel test OR passed dpiFail gate.
+//   - FIX #3: Bandwidth SNI guard — always use 'speed.cloudflare.com' for BW
+//             test when effectiveSni is NOT in Cloudflare family. Using an
+//             arbitrary Google/Akamai SNI for the download request returned
+//             the root HTML page (a few KB) instead of a real BW payload,
+//             making every non-CF IP show ~10–50 KB/s regardless of real speed.
 import 'dart:async';
 import 'dart:math';
 import '../models/scan_result.dart';
@@ -242,16 +253,48 @@ Future<ScanResult> _scanWithSni(
 
   final tier = calcTier(survival.survivalMs, phase);
 
-  final isAlive = (tier != IpTier.dead && tier != IpTier.weak
-      ? true
-      : phase == ScanPhase.passed)
-      && (cfWsOk == null || cfWsOk == true);
+  // FIX #2: isAlive must be grounded in survival.survived, not just tier.
+  // Old code: any IP reaching tier >= usable (survivalMs > 0 after the
+  // premature 5s blackhole kill) was marked alive. That's what caused the
+  // "weird results" — every IP looked usable with survivalMs≈5000.
+  // New logic:
+  //   • passed phase         → always alive (survived full tunnel)
+  //   • dpiFail phase        → alive only if survivalMs ≥ 5000 (partial tunnel ok)
+  //   • survivalFail phase   → alive only if tier is at least usable
+  //                            AND survivalMs ≥ 5000 (got meaningful data)
+  //   • cfWsOk gate: non-null cfWsOk=false always kills the IP (CF WS mode)
+  final bool baseAlive;
+  switch (phase) {
+    case ScanPhase.passed:
+      baseAlive = true;
+      break;
+    case ScanPhase.dpiFail:
+      baseAlive = survival.survivalMs >= 5000;
+      break;
+    case ScanPhase.survivalFail:
+      baseAlive = tier != IpTier.dead &&
+                  tier != IpTier.weak &&
+                  survival.survivalMs >= 5000;
+      break;
+    default:
+      baseAlive = false;
+  }
+  final isAlive = baseAlive && (cfWsOk == null || cfWsOk == true);
 
+  // FIX #3: Bandwidth SNI guard.
+  // Only 'speed.cloudflare.com' has a proper /__down?bytes=N endpoint.
+  // For all other SNIs the BW test was downloading the root HTML page
+  // (a few KB) → reported speed was always artificially low (~10-50 KB/s).
+  // Fix: use speed.cloudflare.com as the BW SNI when effectiveSni is not
+  // in the Cloudflare family; this gives a real download measurement.
   double? speedKBs;
   if (tier == IpTier.excellent ||
       tier == IpTier.good ||
       tier == IpTier.usable) {
-    speedKBs = await measureBandwidthKBs(ip, sni: effectiveSni);
+    final bwSni = kSniCloudflareFamily.contains(effectiveSni)
+        ? effectiveSni
+        : 'speed.cloudflare.com';
+    speedKBs = await measureBandwidthKBs(ip, sni: bwSni);
   }
 
   final trustBonus = SubnetMemoryCache().trustBonus(ip);
@@ -284,7 +327,7 @@ Future<ScanResult> _scanWithSni(
     phase: 'probe_done',
     ip: ip,
     sni: sni,
-    event: 'tier=${tier.name} grade=$grade survival=${survival.survivalMs}ms',
+    event: 'tier=${tier.name} grade=$grade survival=${survival.survivalMs}ms alive=$isAlive',
   );
 
   return ScanResult(
