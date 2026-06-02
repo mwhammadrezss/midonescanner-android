@@ -226,7 +226,16 @@ Future<SurvivalResult> tunnelSurvivalTest(
     //
     // In practice a true blackhole (IP accepts TCP/TLS but never responds and
     // the OS doesn't RST) will still be caught by the stall guard below.
-    const _maxFirstHeartbeatMs = 14000; // 7s delay + 5s fake-idle + 2s margin
+    // Max time allowed before first heartbeat is sent.
+// Each part is a top-level const — Dart evaluates the sum at compile-time.
+//   _kHbMaxBaseDelayMs : 3000 + nextInt(4001) → worst case 7000 ms
+//   _kHbMaxFakeIdleMs  : 2000 + nextInt(3000) → worst case 5000 ms (20% chance)
+//   _kHbSafetyMarginMs : safety buffer
+// ⚠️  If you change heartbeat delay ranges, update the three constants below.
+const _kHbMaxBaseDelayMs  = 7000;
+const _kHbMaxFakeIdleMs   = 5000;
+const _kHbSafetyMarginMs  = 2000;
+const _maxFirstHeartbeatMs = _kHbMaxBaseDelayMs + _kHbMaxFakeIdleMs + _kHbSafetyMarginMs; // = 14000
     Future.doWhile(() async {
       await Future.delayed(const Duration(milliseconds: 500));
       if (deathCompleter.isCompleted || connectionDead) return false;
