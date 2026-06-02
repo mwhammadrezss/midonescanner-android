@@ -775,8 +775,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       isCfScan = rangeCfMode;
       normalSniOverride = rangeCfMode ? 'speed.cloudflare.com' : null;
     } else {
-      // CDN mode: deep scan uses CF probes; normal uses default kShiroSni
+      // CDN mode: normal + deep both use speed.cloudflare.com as SNI
+      // FIX: www.google.com SNI fails on CF edge IPs (104.17.x.x etc.) — CF edge
+      // only accepts its own SNIs. Using speed.cloudflare.com works for all CF IPs
+      // and still allows non-CF IPs to be probed (they'll fail TLS — correctly dead).
       isCfScan = _cdnSubMode == CdnSubMode.deep;
+      normalSniOverride = 'speed.cloudflare.com';
     }
 
     runIsolateScanEngine(
