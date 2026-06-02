@@ -128,23 +128,24 @@ Future<({double latencyMs, int retransmits, ProbeTimings? timings})?> androidTls
   }
 }
 
-// p4: smartRetryBackoff — exponential jitter retry
+// p4: smartRetryBackoff — exponential jitter retry (OPTIMIZED)
 // cf-sni-rotation: if sniRotation=true, each retry cycles through kCfSniHostnames
 // UPGRADED: watchdog wraps each androidTlsProbe call to kill hung sockets
+// OPTIMIZED: retries 3→2, timeout 10s→6s, base delay 300→200, jitter 200→150, cap 2000→1000
 Future<({double latencyMs, int retransmits, ProbeTimings? timings, String sniUsed})?> probeWithRetry(
   String ip, {
   String sni         = kShiroSni,
-  int    retries     = 3,
+  int    retries     = 2,          // OPTIMIZED: was 3 — reduces worst-case per dead IP from 31s to 12s
   bool   sniRotation = false,
 }) async {
   for (int i = 0; i < retries; i++) {
     final effectiveSni = (sniRotation && kCfSniHostnames.isNotEmpty)
         ? kCfSniHostnames[i % kCfSniHostnames.length]
         : sni;
-    // UPGRADED: watchdog ensures hung sockets are killed within 16s
+    // UPGRADED: watchdog ensures hung sockets are killed within timeout
     final r = await withWatchdog(
       fn: () => androidTlsProbe(ip, sni: effectiveSni),
-      timeout: const Duration(seconds: 10),
+      timeout: const Duration(seconds: 6),   // OPTIMIZED: was 10s
       fallback: null,
     );
     if (r != null) {
@@ -156,9 +157,9 @@ Future<({double latencyMs, int retransmits, ProbeTimings? timings, String sniUse
       );
     }
     if (i < retries - 1) {
-      final baseMs   = (300 * pow(2, i)).toInt();
-      final jitterMs = _probeRng.nextInt(200);
-      final delayMs  = (baseMs + jitterMs).clamp(200, 2000);
+      final baseMs   = (200 * pow(2, i)).toInt();   // OPTIMIZED: was 300
+      final jitterMs = _probeRng.nextInt(150);       // OPTIMIZED: was 200
+      final delayMs  = (baseMs + jitterMs).clamp(150, 1000);  // OPTIMIZED: cap 2000→1000
       await Future.delayed(Duration(milliseconds: delayMs));
     }
   }
@@ -367,13 +368,6 @@ class CfMultiProbeResult {
   });
 
   // IsHealthy() — mirrors SenPai result.IsHealthy() for ModeHTTP exactly
-  // Conditions (in order):
-  //   loss >= 50% OR avg <= 0            → false  (always)
-  //   port != 80 AND !tlsOk              → false  (port 80 = plain HTTP, no TLS needed)
-  //   httpStatus < 200 OR >= 400         → false
-  //   colo empty                         → false
-  //   speedTested AND throughputKBs <= 0 → false  (SenPai: SpeedTested && Throughput<=0)
-  //   requireWs AND !wsOk                → false  (SenPai: RequireWS && !WSOk)
   bool isHealthy({int port = 443}) {
     if (lossPercent >= 50 || avgMs <= 0) return false;
     if (port != 80 && !tlsOk) return false;
@@ -383,12 +377,10 @@ class CfMultiProbeResult {
     return true;
   }
 
-  // Convenience getter — assumes port 443 (standard CF scanner mode)
   bool get isCloudflareEdge => isHealthy(port: 443);
 }
 
 /// Single raw probe — one try: connect → TLS → GET /cdn-cgi/trace
-/// Returns latencyMs (0 on failure) + CfHttpResult
 Future<({double latencyMs, CfHttpResult result})> _cfHttpProbeSingle(
   String ip, {
   String sni        = 'speed.cloudflare.com',
@@ -458,14 +450,12 @@ Future<({double latencyMs, CfHttpResult result})> _cfHttpProbeSingle(
 }
 
 /// Multi-try HTTP probe — SENPAI-SYNC
-/// Mirrors SenPai Probe() with cfg.Tries=4 and per-try jitter between attempts.
-/// Returns CfMultiProbeResult with full loss/latency stats.
 Future<CfMultiProbeResult> cfHttpProbeMulti(
   String ip, {
   String sni          = '',
-  int    tries        = 4,       // SenPai default = 4
-  int    budgetMs     = 5000,    // SenPai default = 5s
-  bool Function()? isCancelled,  // mirrors SenPai ctx.Err() check
+  int    tries        = 4,
+  int    budgetMs     = 5000,
+  bool Function()? isCancelled,
 }) async {
   final effectiveSni = sni.isNotEmpty ? sni : 'speed.cloudflare.com';
   final latencies    = List<double>.filled(tries, 0);
@@ -474,15 +464,13 @@ Future<CfMultiProbeResult> cfHttpProbeMulti(
   String colo        = '';
 
   for (int i = 0; i < tries; i++) {
-    // SENPAI-SYNC: mirrors SenPai "if ctx.Err() != nil { break }"
     if (isCancelled != null && isCancelled()) break;
     final r = await _cfHttpProbeSingle(ip, sni: effectiveSni, budgetMs: budgetMs);
-    latencies[i] = r.latencyMs; // 0 = failed (mirrors SenPai Latencies[i]=0)
+    latencies[i] = r.latencyMs;
     if (r.result.tlsOk)    tlsOk      = true;
     if (r.result.httpStatus > 0) httpStatus = r.result.httpStatus;
     if (r.result.colo.isNotEmpty) colo = r.result.colo;
 
-    // Small jitter between tries — mirrors SenPai prober.go inter-try sleep
     if (i < tries - 1) {
       final jitterMs = 10 + _probeRng.nextInt(50);
       await Future.delayed(Duration(milliseconds: jitterMs));
@@ -534,7 +522,7 @@ CfMultiProbeResult _buildMultiResult({
     if (successful.length >= 2) {
       final variance = successful
           .map((l) => (l - avgMs) * (l - avgMs))
-          .reduce((a, b) => a + b) / (successful.length - 1); // Bessel's correction (sample variance)
+          .reduce((a, b) => a + b) / (successful.length - 1);
       jitterMs = sqrt(variance);
     }
   }

@@ -1,6 +1,7 @@
 // lib/engine/adaptive_concurrency.dart
 // p30: adaptiveConcurrencyController — dynamically adjusts concurrency based on network errors
 // UPGRADED: min 2→4, max 24→50, initial 8→12 for Windows-level performance
+// OPTIMIZED: initial 12→8, max 50→30 for more conservative mobile-first defaults
 
 class AdaptiveConcurrencyController {
   static final AdaptiveConcurrencyController _i =
@@ -8,12 +9,12 @@ class AdaptiveConcurrencyController {
   factory AdaptiveConcurrencyController() => _i;
   AdaptiveConcurrencyController._();
 
-  int _current = 12;
+  int _current = 8;   // OPTIMIZED: was 12
   int _errorCount = 0;
   int _successCount = 0;
 
   static const int _minConcurrency = 4;
-  static const int _maxConcurrency = 50;
+  static const int _maxConcurrency = 30;   // OPTIMIZED: was 50
   static const int _scaleUpThreshold = 10;
   static const int _scaleDownThreshold = 5;
   static const int _scaleStep = 2;
@@ -49,13 +50,13 @@ class AdaptiveConcurrencyController {
 
   /// Reset to default concurrency.
   void reset() {
-    _current = 12;
+    _current = 8;   // OPTIMIZED: was 12
     _errorCount = 0;
     _successCount = 0;
   }
 
   /// Get concurrency capped by IP count and a hardcoded upper limit.
-  int effectiveConcurrency({required int totalIps, int max = 50}) {
+  int effectiveConcurrency({required int totalIps, int max = 30}) {  // OPTIMIZED: default max 50→30
     if (totalIps < 20) return _current.clamp(_minConcurrency, 8);
     if (totalIps < 100) return _current.clamp(_minConcurrency, 16);
     return _current.clamp(_minConcurrency, max);

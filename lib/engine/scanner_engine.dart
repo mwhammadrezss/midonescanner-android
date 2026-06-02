@@ -4,6 +4,9 @@
 //   - TCP prefilter: 40 → 100 concurrent, 4000ms → 3000ms timeout
 //   - Normal scan baseConcurrency: 8 → 20
 //   - Replaced manual activeScans/Completers with clean Semaphore pattern
+// OPTIMIZED:
+//   - _survivalNormal: 12000 → 10000 (faster scan cycle)
+//   - _survivalDeep:   15000 → 12000 (faster deep scan cycle)
 import 'dart:async';
 import 'dart:math';
 import '../models/scan_result.dart';
@@ -28,9 +31,9 @@ const shiroSni = kShiroSni;
 
 enum ScanMode { normal, deep }
 
-// Survival targets
-const _survivalNormal = 12000;
-const _survivalDeep   = 15000;
+// Survival targets — OPTIMIZED: reduced for faster scan cycles
+const _survivalNormal = 10000;  // was 12000
+const _survivalDeep   = 12000;  // was 15000
 
 // ─── scanOneIp ───────────────────────────────────────────────────────────────
 Future<ScanResult> scanOneIp(
@@ -159,7 +162,7 @@ Future<ScanResult> _scanWithSni(
 }) async {
   StructuredLogger().log(phase: 'probe_start', ip: ip, sni: sni);
 
-  final first = await probeWithRetry(ip, sni: sni, retries: 3, sniRotation: runCfProbe);
+  final first = await probeWithRetry(ip, sni: sni, retries: 2, sniRotation: runCfProbe);
   if (first == null) {
     StructuredLogger()
         .log(phase: 'probe_fail', ip: ip, sni: sni, error: 'TLS fail');
@@ -390,9 +393,8 @@ Future<List<ScanResult>> runScanningEngine(
   onPrefilterDone?.call(liveIps.length, ips.length);
   if (liveIps.isEmpty) return results;
 
-  // ── Step 1: Full scan on live IPs — UPGRADED: clean Semaphore + higher concurrency
+  // ── Step 1: Full scan on live IPs ─────────────────────────────────────────
   final adaptiveCtrl = AdaptiveConcurrencyController();
-  // UPGRADED: baseConcurrency for normal mode: 8 → 20
   final baseConcurrency = min(concurrency, 20);
   adaptiveCtrl.seed(baseConcurrency);
 
@@ -409,8 +411,6 @@ Future<List<ScanResult>> runScanningEngine(
     onProgress?.call(0, totalLive, _startResult);
   }
 
-  // UPGRADED: clean Semaphore pattern (replaces manual _activeScans/_scanCompleters)
-  // Semaphore tracks adaptive concurrency — expands when controller scales up
   int _prevConcurrency = adaptiveCtrl.current;
   final scanSem = Semaphore(_prevConcurrency);
 
@@ -434,7 +434,6 @@ Future<List<ScanResult>> runScanningEngine(
       } else {
         adaptiveCtrl.recordError();
       }
-      // Expand semaphore if adaptive controller scaled up
       final newConcurrency = adaptiveCtrl.current;
       if (newConcurrency > _prevConcurrency) {
         scanSem.expand(newConcurrency - _prevConcurrency);

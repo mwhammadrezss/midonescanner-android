@@ -15,6 +15,7 @@
 // p14: fakeIdlePattern — occasional silence between heartbeats
 // p15: adaptiveHeartbeatInterval — interval adapts to connection stability
 // p16: dpiSuspicionScore — probability score instead of boolean
+// OPTIMIZED: stallTimeout survivalTargetMs+8000→+4000, added early blackhole detection at 5s
 
 import 'dart:async';
 import 'dart:io';
@@ -140,9 +141,6 @@ Future<SurvivalResult> tunnelSurvivalTest(
     );
 
     // ── p13+p14+p15: Adaptive fragmented heartbeat with fake idle ──────────
-    // - Randomly use fragmented or normal payload
-    // - Occasionally inject fake silence (p14)
-    // - Adapt interval based on stability (p15)
     Future<void> runHeartbeat() async {
       while (true) {
         // p15: adaptive interval
@@ -170,7 +168,6 @@ Future<SurvivalResult> tunnelSurvivalTest(
             final chunks = _fragmentedPayload();
             for (final chunk in chunks) {
               tlsRef.add(chunk);
-              // Small inter-chunk delay for more natural pattern
               if (chunk != chunks.last) {
                 await Future.delayed(
                   Duration(microseconds: 200 + _rng.nextInt(800)),
@@ -206,8 +203,19 @@ Future<SurvivalResult> tunnelSurvivalTest(
       }).ignore();
     }
 
+    // ── Early blackhole detection: if no activity within 5s, bail out ──────
+    Future.delayed(const Duration(milliseconds: 5000), () {
+      if (!deathCompleter.isCompleted && !connectionDead && !hadErrors) {
+        // No data, no error, no heartbeat response — likely a blackhole
+        blackhole = true;
+        connectionDead = true;
+        if (!deathCompleter.isCompleted) deathCompleter.complete();
+      }
+    }).ignore();
+
     // ── Blackhole detection: stalled socket ─────────────────────────────────
-    final stallTimeout = Duration(milliseconds: survivalTargetMs + 8000);
+    // OPTIMIZED: stallTimeout +8000→+4000 (reduces total hang time)
+    final stallTimeout = Duration(milliseconds: survivalTargetMs + 4000);
 
     await Future.any([
       Future.delayed(Duration(milliseconds: survivalTargetMs)),
@@ -218,12 +226,11 @@ Future<SurvivalResult> tunnelSurvivalTest(
     }).catchError((_) {});
 
     sw.stop();
-    connectionDead = true; // BUGFIX: set before sub.cancel() to stop heartbeat loop immediately
+    connectionDead = true; // set before sub.cancel() to stop heartbeat loop immediately
     await sub.cancel();
     try { await tls.close(); } catch (_) {}
     tls.destroy();
 
-    // BUG 2 FIX: use survivalTargetMs not hardcoded 5000ms
     final survived = !errorKilled && !blackhole && sw.elapsedMilliseconds >= survivalTargetMs;
 
     return SurvivalResult(
