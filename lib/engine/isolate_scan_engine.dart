@@ -350,7 +350,7 @@ Future<List<ScanResult>> runIsolateScanEngine(
   int prefiltersDone = 0;
   bool prefilterReported = false;
 
-  final topResults = _TopNResults(maxCapacity: 100);
+  final topResults = _TopNResults(maxCapacity: 9999); // FIX: was 100 — caused 0 results on large scans
   final completer = Completer<void>();
   int workersRemaining = chunks.length;
 
@@ -410,6 +410,15 @@ Future<List<ScanResult>> runIsolateScanEngine(
       workerFinished = true;
       try { receivePort.close(); } catch (_) {}
       workersRemaining--;
+      // FIX: if this worker crashed before sending _WorkerPrefilterDone,
+      // increment prefiltersDone here so we don't wait forever
+      if (prefiltersDone < chunks.length) {
+        prefiltersDone++;
+        if (!prefilterReported && prefiltersDone >= chunks.length) {
+          prefilterReported = true;
+          onPrefilterDone?.call(totalLive, totalIps);
+        }
+      }
       if (workersRemaining <= 0 && !completer.isCompleted) completer.complete();
     }
 
@@ -427,8 +436,17 @@ Future<List<ScanResult>> runIsolateScanEngine(
       if (msg is _WorkerPrefilterDone) {
         totalLive += msg.liveCount;
         prefiltersDone++;
+        // FIX: fire onPrefilterDone after ALL isolates report (or immediately if
+        // we already have data and a later isolate finishes last). Previously this
+        // gate could deadlock if one isolate crashed before sending _WorkerPrefilterDone,
+        // meaning prefiltersDone never reached chunks.length and _total stayed at
+        // the raw IP count — causing progress % to be wrong and UI to show stale state.
         if (!prefilterReported && prefiltersDone >= chunks.length) {
           prefilterReported = true;
+          onPrefilterDone?.call(totalLive, totalIps);
+        } else if (!prefilterReported && totalLive > 0 && prefiltersDone >= 1) {
+          // Partial report: at least one isolate done — update UI with what we have
+          // so progress bar doesn't freeze. Will be overwritten when all done.
           onPrefilterDone?.call(totalLive, totalIps);
         }
       } else if (msg is _WorkerBatch) {
