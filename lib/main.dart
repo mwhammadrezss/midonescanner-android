@@ -566,7 +566,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _pendingResults.clear();
         _displayDirty = true;
         final pct = _total > 0 ? (_done / _total * 100).round() : 0;
-        _statusText = 'Scanning $pct% — ETA ${_calcEta()}';
+        _statusText = 'Scanning $pct%...';
       });
     });
   }
@@ -779,10 +779,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         // setState immediately so progress bar updates on every IP
         setState(() {
           _done = done;
-          _total = total;
-          if (done > 0 && total > 0) {
-            final pct = (done / total * 100).round();
-            _statusText = 'Scanning $pct% — ETA ${_calcEta()}';
+          // Do NOT overwrite _total from onProgress — prefilter count is the stable source
+          if (_total == 0 || total < _total) _total = total;
+          if (done > 0 && _total > 0) {
+            final pct = (done / _total * 100).round();
+            _statusText = 'Scanning $pct%...';
           }
         });
         final pct = total > 0 ? (done / total * 100).round() : 0;
@@ -805,7 +806,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _scanning = false;
         _prefiltering = false;
         _displayDirty = true;
-        _statusText = 'Done! ${results.where((r) => r.isAlive).length} results';
+        // Recount stats from final results list to ensure alignment with actual data
+        _okCount   = results.where((r) => r.tier == IpTier.excellent || r.tier == IpTier.good).length;
+        _thrCount  = results.where((r) => r.tier == IpTier.usable || r.tier == IpTier.weak).length;
+        _failCount = results.where((r) => r.tier == IpTier.dead).length;
+        _statusText = 'Done! \${results.where((r) => r.isAlive).length} results';
       });
       if (results.isNotEmpty) {
         _showSnack('✓ Done! ${results.where((r) => r.isAlive).length} results found');
