@@ -280,9 +280,12 @@ Future<String> detectIspName() async {
     if (sep >= 0) {
       final body = resp.substring(sep + 4).trim();
       // مثلاً: "AS44244 Iran Cell Service and Communication Company"
-      final spaceIdx = body.indexOf(' ');
-      if (spaceIdx > 0) {
-        return _normalizeIsp(body.substring(spaceIdx + 1));
+      // FIX#5: guard — skip JSON/HTML error responses (429, rate-limit, etc.)
+      if (!body.startsWith('{') && !body.startsWith('<')) {
+        final spaceIdx = body.indexOf(' ');
+        if (spaceIdx > 0) {
+          return _normalizeIsp(body.substring(spaceIdx + 1));
+        }
       }
     }
   } catch (_) {}
@@ -336,8 +339,11 @@ Future<String> detectIspName() async {
     final sep = resp.indexOf('\r\n\r\n');
     if (sep >= 0) {
       final body = resp.substring(sep + 4).trim();
-      final spaceIdx = body.indexOf(' ');
-      if (spaceIdx > 0) return _normalizeIsp(body.substring(spaceIdx + 1));
+      // FIX#5: guard — skip JSON/HTML error responses (429, rate-limit, etc.)
+      if (!body.startsWith('{') && !body.startsWith('<')) {
+        final spaceIdx = body.indexOf(' ');
+        if (spaceIdx > 0) return _normalizeIsp(body.substring(spaceIdx + 1));
+      }
     }
   } catch (_) {}
 
