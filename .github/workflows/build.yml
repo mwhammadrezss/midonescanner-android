@@ -2,7 +2,7 @@ name: 🦁 MidONe Scanner — Build & Release
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, refactor/scan-engine-v2 ]
   workflow_dispatch:
 
 jobs:
