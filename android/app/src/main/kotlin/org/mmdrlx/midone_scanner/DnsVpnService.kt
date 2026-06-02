@@ -23,18 +23,18 @@ class DnsVpnService : VpnService() {
         const val TAG = "DnsVpnService"
         const val CHANNEL_ID = "dns_vpn_channel"
         const val NOTIF_ID = 9001
-        const val ACTION_START = "ACTION_START_DNS_VPN"
-        const val ACTION_STOP  = "ACTION_STOP_DNS_VPN"
-        const val EXTRA_DNS1   = "dns1"
-        const val EXTRA_DNS2   = "dns2"
+        const val ACTION_START  = "ACTION_START_DNS_VPN"
+        const val ACTION_STOP   = "ACTION_STOP_DNS_VPN"
+        const val EXTRA_DNS1    = "dns1"
+        const val EXTRA_DNS2    = "dns2"
         const val ACTION_STATUS = "org.mmdrlx.midone_scanner.DNS_VPN_STATUS"
-        const val EXTRA_RUNNING = "running"
-        const val EXTRA_DNS1_STATUS = "dns1_status"
-        const val EXTRA_DNS2_STATUS = "dns2_status"
+        const val EXTRA_RUNNING      = "running"
+        const val EXTRA_DNS1_STATUS  = "dns1_status"
+        const val EXTRA_DNS2_STATUS  = "dns2_status"
 
-        @Volatile var isRunning = false
-        @Volatile var activeDns1: String? = null
-        @Volatile var activeDns2: String? = null
+        @Volatile var isRunning:   Boolean = false
+        @Volatile var activeDns1:  String? = null
+        @Volatile var activeDns2:  String? = null
     }
 
     private var vpnInterface: ParcelFileDescriptor? = null
@@ -82,17 +82,11 @@ class DnsVpnService : VpnService() {
             .addRoute("0.0.0.0", 0)
             .setMtu(1500)
             .addDnsServer(dns1)
-            .addDisallowedApplication(packageName) // prevent routing loop
+            .addDisallowedApplication(packageName)
 
         if (dns2 != null) {
             try { builder.addDnsServer(dns2) } catch (_: Exception) {}
         }
-
-        // IPv6 — only add if both addresses provided to avoid issues
-        try {
-            builder.addAddress("fd00:1::", 120)
-            builder.addRoute("::", 0)
-        } catch (_: Exception) {}
 
         vpnInterface = builder.establish() ?: run {
             Log.e(TAG, "VPN establish() returned null")
@@ -103,7 +97,7 @@ class DnsVpnService : VpnService() {
         running.set(true)
         isRunning = true
         broadcastStatus(true)
-        startForeground()
+        startForegroundNotif()
 
         tunnelThread = Thread({ runTunnel(dns1, dns2) }, "dns-vpn-tunnel").also { it.start() }
         Log.i(TAG, "VPN started — DNS1=$dns1 DNS2=$dns2")
@@ -111,7 +105,7 @@ class DnsVpnService : VpnService() {
 
     private fun stopVpn() {
         running.set(false)
-        isRunning = false
+        isRunning  = false
         activeDns1 = null
         activeDns2 = null
         tunnelThread?.interrupt()
@@ -127,54 +121,49 @@ class DnsVpnService : VpnService() {
     // ── Tunnel Loop ────────────────────────────────────────────────────────
 
     private fun runTunnel(dns1: String, dns2: String?) {
-        val pfd = vpnInterface ?: return
-        val `in`  = FileInputStream(pfd.fileDescriptor)
-        val out = FileOutputStream(pfd.fileDescriptor)
-        val buf = ByteArray(32767)
+        val pfd  = vpnInterface ?: return
+        val ins  = FileInputStream(pfd.fileDescriptor)
+        val outs = FileOutputStream(pfd.fileDescriptor)
+        val buf  = ByteArray(32767)
 
         while (running.get()) {
             try {
-                val len = `in`.read(buf)
+                val len = ins.read(buf)
                 if (len <= 0) { Thread.sleep(10); continue }
 
-                val packet = ByteArray(len).also { System.arraycopy(buf, 0, it, 0, len) }
+                if (len < 28) continue // min IPv4(20)+UDP(8)
 
-                // Parse IPv4 packet
-                if (len < 28) continue // min IPv4(20) + UDP(8)
-                val ipVersion = (packet[0].toInt() shr 4) and 0xF
-                if (ipVersion != 4) continue // skip IPv6 for now
+                val ipVersion    = (buf[0].toInt() shr 4) and 0xF
+                if (ipVersion != 4) continue
 
-                val ipHeaderLen = (packet[0].toInt() and 0xF) * 4
-                val protocol = packet[9].toInt() and 0xFF
+                val ipHeaderLen  = (buf[0].toInt() and 0xF) * 4
+                val protocol     = buf[9].toInt() and 0xFF
                 if (protocol != 17) continue // UDP only
 
-                val dstPort = ((packet[ipHeaderLen + 2].toInt() and 0xFF) shl 8) or
-                              (packet[ipHeaderLen + 3].toInt() and 0xFF)
-                if (dstPort != 53) continue // DNS only
+                val dstPort = ((buf[ipHeaderLen + 2].toInt() and 0xFF) shl 8) or
+                               (buf[ipHeaderLen + 3].toInt() and 0xFF)
+                if (dstPort != 53) continue
 
-                val srcPort = ((packet[ipHeaderLen].toInt() and 0xFF) shl 8) or
-                              (packet[ipHeaderLen + 1].toInt() and 0xFF)
+                val srcPort = ((buf[ipHeaderLen].toInt() and 0xFF) shl 8) or
+                               (buf[ipHeaderLen + 1].toInt() and 0xFF)
 
                 val payloadOffset = ipHeaderLen + 8
                 val payloadLen    = len - payloadOffset
                 if (payloadLen <= 0) continue
 
-                val dnsQuery = ByteArray(payloadLen).also {
-                    System.arraycopy(packet, payloadOffset, it, 0, payloadLen)
-                }
+                val dnsQuery = buf.copyOfRange(payloadOffset, payloadOffset + payloadLen)
+                val srcIpBytes = buf.copyOfRange(12, 16)  // original source IP
 
-                // Forward to upstream DNS
                 val response = forwardDns(dnsQuery, dns1, dns2) ?: continue
 
-                // Build response packet: IPv4 + UDP + DNS payload
                 val resp = buildUdpPacket(
-                    srcIp  = byteArrayOf(10, 111, 222, 1),           // our TUN addr
-                    dstIp  = packet.copyOfRange(12, 16),              // original src IP
+                    srcIp   = byteArrayOf(10, 111.toByte(), 222.toByte(), 1),
+                    dstIp   = srcIpBytes,
                     srcPort = 53,
                     dstPort = srcPort,
                     payload = response
                 )
-                out.write(resp)
+                outs.write(resp)
             } catch (_: InterruptedException) {
                 break
             } catch (e: Exception) {
@@ -189,7 +178,8 @@ class DnsVpnService : VpnService() {
     private fun forwardDns(query: ByteArray, dns1: String, dns2: String?): ByteArray? {
         for (upstream in listOfNotNull(dns1, dns2)) {
             try {
-                val sock = DatagramSocket().also { protect(it) }
+                val sock = DatagramSocket()
+                protect(sock)
                 sock.soTimeout = 3000
                 val addr = InetAddress.getByName(upstream)
                 sock.send(DatagramPacket(query, query.size, addr, 53))
@@ -218,13 +208,13 @@ class DnsVpnService : VpnService() {
 
         // IPv4 header
         buf.put(0x45.toByte())               // version=4, IHL=5
-        buf.put(0)                           // DSCP/ECN
+        buf.put(0.toByte())                  // DSCP/ECN
         buf.putShort(totalLen.toShort())     // total length
-        buf.putShort(0)                      // identification
+        buf.putShort(0.toShort())            // identification
         buf.putShort(0x4000.toShort())       // flags: Don't Fragment
-        buf.put(64)                          // TTL
-        buf.put(17)                          // protocol: UDP
-        buf.putShort(0)                      // checksum placeholder
+        buf.put(64.toByte())                 // TTL
+        buf.put(17.toByte())                 // protocol: UDP
+        buf.putShort(0.toShort())            // checksum placeholder
         buf.put(srcIp)
         buf.put(dstIp)
 
@@ -236,7 +226,7 @@ class DnsVpnService : VpnService() {
         buf.putShort(srcPort.toShort())
         buf.putShort(dstPort.toShort())
         buf.putShort(udpLen.toShort())
-        buf.putShort(0)  // UDP checksum (optional, set 0)
+        buf.putShort(0.toShort())            // UDP checksum optional
 
         // Payload
         buf.put(payload)
@@ -257,9 +247,9 @@ class DnsVpnService : VpnService() {
         return (sum.inv() and 0xFFFF).toShort()
     }
 
-    // ── Notification ───────────────────────────────────────────────────────
+    // ── Foreground Notification ────────────────────────────────────────────
 
-    private fun startForeground() {
+    private fun startForegroundNotif() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID, "DNS VPN",
@@ -275,12 +265,10 @@ class DnsVpnService : VpnService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notif = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val notif = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             Notification.Builder(this, CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
+        else
+            @Suppress("DEPRECATION") Notification.Builder(this))
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentTitle("MidONe DNS Active")
             .setContentText("DNS → ${activeDns1}")
@@ -293,9 +281,9 @@ class DnsVpnService : VpnService() {
 
     // ── Broadcast ─────────────────────────────────────────────────────────
 
-    private fun broadcastStatus(running: Boolean) {
+    private fun broadcastStatus(isRunning: Boolean) {
         val intent = Intent(ACTION_STATUS).apply {
-            putExtra(EXTRA_RUNNING, running)
+            putExtra(EXTRA_RUNNING,     isRunning)
             putExtra(EXTRA_DNS1_STATUS, activeDns1)
             putExtra(EXTRA_DNS2_STATUS, activeDns2)
         }
