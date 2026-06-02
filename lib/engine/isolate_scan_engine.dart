@@ -442,11 +442,10 @@ Future<List<ScanResult>> runIsolateScanEngine(
         // meaning prefiltersDone never reached chunks.length and _total stayed at
         // the raw IP count — causing progress % to be wrong and UI to show stale state.
         if (!prefilterReported && prefiltersDone >= chunks.length) {
+          // FIX(prefilter-reset): fire ONCE only after ALL workers report.
+          // Firing early (partial) caused main.dart to reset _done=0 mid-scan,
+          // resulting in "1000 IPs, 0 done" when the last worker had no live IPs.
           prefilterReported = true;
-          onPrefilterDone?.call(totalLive, totalIps);
-        } else if (!prefilterReported && totalLive > 0 && prefiltersDone >= 1) {
-          // Partial report: at least one isolate done — update UI with what we have
-          // so progress bar doesn't freeze. Will be overwritten when all done.
           onPrefilterDone?.call(totalLive, totalIps);
         }
       } else if (msg is _WorkerBatch) {
