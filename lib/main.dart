@@ -2751,6 +2751,316 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
 
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // ── Android DNS VPN Apply Section ─────────────────────────────────────────
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Widget _buildAndroidApplyDnsSection() {
+    final aliveSorted = (_dnsResults ?? []).where((s) => !s.eliminated).toList();
+    final top5 = aliveSorted.take(5).toList();
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0A1A1F),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _dnsVpnRunning
+              ? const Color(0xFF00FF88).withOpacity(0.6)
+              : const Color(0xFF00E5FF).withOpacity(0.35),
+          width: 1.5,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header
+          Row(
+            children: [
+              Icon(
+                _dnsVpnRunning ? Icons.shield_rounded : Icons.dns_rounded,
+                color: _dnsVpnRunning ? const Color(0xFF00FF88) : const Color(0xFF00E5FF),
+                size: 16,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _dnsVpnRunning ? 'DNS VPN ACTIVE' : 'APPLY DNS',
+                style: GoogleFonts.inter(
+                  color: _dnsVpnRunning ? const Color(0xFF00FF88) : const Color(0xFF00E5FF),
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              const Spacer(),
+              if (_dnsVpnRunning) ...[
+                Text(
+                  _dnsVpnActiveDns1 ?? '',
+                  style: GoogleFonts.robotoMono(
+                      color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: _stopDnsVpn,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.redAccent.withOpacity(0.5)),
+                    ),
+                    child: Text('Stop VPN',
+                        style: GoogleFonts.inter(
+                            color: Colors.redAccent,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 11)),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          if (!_dnsVpnRunning) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Tap Apply to route all DNS through a server via local VPN.',
+              style: GoogleFonts.inter(color: Colors.white38, fontSize: 11, height: 1.4),
+            ),
+          ],
+          const SizedBox(height: 12),
+
+          // Top server rows (only when VPN not active)
+          if (!_dnsVpnRunning)
+            ...top5.asMap().entries.map((e) {
+              final s = e.value;
+              final rank = s.finalRank ?? (e.key + 1);
+              final lat  = s.avgLatencyMs?.toStringAsFixed(0) ?? '?';
+              final freedom = ((s.freedomScore ?? 0) * 100).toStringAsFixed(0);
+              final Color rankColor = switch (rank) {
+                1 => const Color(0xFFFFD700),
+                2 => const Color(0xFFC0C0C0),
+                3 => const Color(0xFFCD7F32),
+                _ => Colors.white24,
+              };
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 7),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 26, height: 26,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(color: rankColor, shape: BoxShape.circle),
+                      child: Text('#\$rank',
+                          style: const TextStyle(
+                              fontSize: 9, fontWeight: FontWeight.bold, color: Colors.black87)),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(s.ip,
+                              style: GoogleFonts.robotoMono(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13)),
+                          Row(children: [
+                            _applyStatChip('\${lat}ms', Colors.white38),
+                            const SizedBox(width: 6),
+                            _applyStatChip('Free \${freedom}%', const Color(0xFF69FF47)),
+                          ]),
+                        ],
+                      ),
+                    ),
+                    _dnsVpnStarting
+                        ? const SizedBox(
+                            width: 44, height: 28,
+                            child: Center(
+                              child: SizedBox(
+                                width: 14, height: 14,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Color(0xFF00E5FF)),
+                              ),
+                            ))
+                        : GestureDetector(
+                            onTap: () => _startDnsVpn(s.ip),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF00E5FF).withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                    color: const Color(0xFF00E5FF).withOpacity(0.5)),
+                              ),
+                              child: Text('Apply',
+                                  style: GoogleFonts.inter(
+                                      color: const Color(0xFF00E5FF),
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 11)),
+                            ),
+                          ),
+                  ],
+                ),
+              );
+            }),
+
+          // Divider
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Row(children: [
+              const Expanded(child: Divider(color: Colors.white12)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text('or enter manually',
+                    style: GoogleFonts.inter(color: Colors.white38, fontSize: 11)),
+              ),
+              const Expanded(child: Divider(color: Colors.white12)),
+            ]),
+          ),
+
+          // Manual DNS toggle
+          GestureDetector(
+            onTap: () => setState(() => _showManualDnsInput = !_showManualDnsInput),
+            child: Row(
+              children: [
+                const Icon(Icons.edit_rounded, color: Colors.white38, size: 14),
+                const SizedBox(width: 6),
+                Text('Manual DNS Entry',
+                    style: GoogleFonts.inter(
+                        color: Colors.white54,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12)),
+                const Spacer(),
+                Icon(
+                  _showManualDnsInput
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                  color: Colors.white38, size: 16,
+                ),
+              ],
+            ),
+          ),
+
+          if (_showManualDnsInput) ...[
+            const SizedBox(height: 10),
+            _buildDnsTextField(_manualDns1Controller, 'DNS 1 (e.g. 8.8.8.8)'),
+            const SizedBox(height: 8),
+            _buildDnsTextField(_manualDns2Controller, 'DNS 2 (optional)'),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _dnsVpnStarting ? null : () {
+                  final d1 = _manualDns1Controller.text.trim();
+                  final d2 = _manualDns2Controller.text.trim();
+                  if (d1.isEmpty) { _showSnack('Enter at least DNS 1'); return; }
+                  _startDnsVpn(d1, dns2: d2.isEmpty ? null : d2);
+                },
+                icon: _dnsVpnStarting
+                    ? const SizedBox(
+                        width: 14, height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.play_arrow_rounded, size: 16),
+                label: Text('Apply Manual DNS',
+                    style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w700, fontSize: 13)),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF00E5FF),
+                  foregroundColor: const Color(0xFF0D1117),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDnsTextField(TextEditingController ctrl, String hint) {
+    return TextField(
+      controller: ctrl,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      style: GoogleFonts.robotoMono(color: Colors.white, fontSize: 13),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: GoogleFonts.robotoMono(color: Colors.white38, fontSize: 12),
+        filled: true,
+        fillColor: Colors.white.withOpacity(0.05),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: const BorderSide(color: Colors.white12)),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: const BorderSide(color: Colors.white12)),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide:
+                const BorderSide(color: Color(0xFF00E5FF), width: 1.5)),
+      ),
+    );
+  }
+
+  // ── Android VPN methods ───────────────────────────────────────────────────
+
+  Future<void> _startDnsVpn(String dns1, {String? dns2}) async {
+    if (!Platform.isAndroid) return;
+    if (!mounted) return;
+    setState(() { _dnsVpnStarting = true; });
+    try {
+      await _dnsVpnChannel.invokeMethod<void>('startVpn', {
+        'dns1': dns1,
+        'dns2': dns2,
+      });
+      if (mounted) {
+        setState(() {
+          _dnsVpnRunning     = true;
+          _dnsVpnActiveDns1  = dns1;
+          _dnsVpnActiveDns2  = dns2;
+          _dnsVpnStarting    = false;
+        });
+        _showSnack('✓ DNS VPN active — routing through \$dns1');
+      }
+    } on PlatformException catch (e) {
+      if (mounted) {
+        setState(() { _dnsVpnStarting = false; });
+        if (e.code == 'VPN_DENIED') {
+          _showSnack('VPN permission denied. Please allow it and try again.');
+        } else {
+          _showSnack('Failed to start DNS VPN: \${e.message}');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() { _dnsVpnStarting = false; });
+        _showSnack('Error: \$e');
+      }
+    }
+  }
+
+  Future<void> _stopDnsVpn() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _dnsVpnChannel.invokeMethod<void>('stopVpn');
+      if (mounted) {
+        setState(() {
+          _dnsVpnRunning    = false;
+          _dnsVpnActiveDns1 = null;
+          _dnsVpnActiveDns2 = null;
+        });
+        _showSnack('DNS VPN stopped.');
+      }
+    } catch (e) {
+      _showSnack('Error stopping VPN: \$e');
+    }
+  }
+
   Widget _buildApplyDnsSection() {
     final topServers = (_dnsResults ?? []).take(5).toList();
     return Container(
