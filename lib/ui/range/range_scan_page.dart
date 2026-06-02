@@ -130,6 +130,7 @@ class _RangeScanPageState extends State<RangeScanPage> {
       cidr: _selectedCidr!,
       mode: _mode,
       concurrencyOverride: _selectedProfile?.concurrency ?? _concurrency,
+      provider: _selectedProvider,
       onStatsUpdate: (s) {
         if (!mounted) return;
         setState(() => _stats = s);
