@@ -8,10 +8,11 @@ import '../concurrency_engine.dart';
 
 class DeepScanBridge {
   /// Full scan of a single IP
-  Future<ScanResult> scanFull(String ip, {bool deepMode = false}) {
+  Future<ScanResult> scanFull(String ip, {bool deepMode = false, bool isCfScan = false}) {
     return scanOneIp(
       ip,
       mode: deepMode ? ScanMode.deep : ScanMode.normal,
+      isCfScan: isCfScan,
     );
   }
 
@@ -20,6 +21,7 @@ class DeepScanBridge {
     List<String> ips, {
     bool deepMode = false,
     int concurrency = 4,
+    bool isCfScan = false,
     bool Function()? isCancelled,
     void Function(ScanResult)? onResult,
   }) async {
@@ -35,6 +37,7 @@ class DeepScanBridge {
         final r = await scanOneIp(
           ip,
           mode: deepMode ? ScanMode.deep : ScanMode.normal,
+          isCfScan: isCfScan,
         );
         results.add(r);
         onResult?.call(r);
