@@ -810,7 +810,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _okCount   = results.where((r) => r.tier == IpTier.excellent || r.tier == IpTier.good).length;
         _thrCount  = results.where((r) => r.tier == IpTier.usable || r.tier == IpTier.weak).length;
         _failCount = results.where((r) => r.tier == IpTier.dead).length;
-        _statusText = 'Done! \${results.where((r) => r.isAlive).length} results';
+        _statusText = 'Done! ${results.where((r) => r.isAlive).length} results';
       });
       if (results.isNotEmpty) {
         _showSnack('✓ Done! ${results.where((r) => r.isAlive).length} results found');
