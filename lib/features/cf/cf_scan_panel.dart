@@ -1,6 +1,6 @@
 // SenPai-style Cloudflare scanner UI (Phase 1 + Phase 2 xray).
 
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';

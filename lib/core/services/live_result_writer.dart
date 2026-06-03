@@ -29,8 +29,8 @@ class LiveResultWriter {
     }
     _file = File('${dir.path}${Platform.pathSeparator}$_fileName');
     _sink = _file!.openWrite(mode: FileMode.append);
-    await _sink!.writeln('# MidONe Scanner — live CF results');
-    await _sink!.writeln('# $_fileName');
+    _sink!.writeln('# MidONe Scanner — live CF results');
+    _sink!.writeln('# $_fileName');
     return _file!;
   }
 

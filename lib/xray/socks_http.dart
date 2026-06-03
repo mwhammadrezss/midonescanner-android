@@ -64,7 +64,7 @@ Future<({bool ok, double latencyMs, String? error})> socksHttpGet(
     }
     return (ok: true, latencyMs: sw.elapsedMilliseconds.toDouble(), error: null);
   } catch (e) {
-    return (ok: false, latencyMs: 0, error: e.toString());
+    return (ok: false, latencyMs: 0.0, error: e.toString());
   } finally {
     try { await tls?.close(); } catch (_) {}
     try { tls?.destroy(); } catch (_) {}
@@ -111,10 +111,10 @@ Future<({int bytes, double bps})> socksHttpDownload(
     }
     sw.stop();
     final sec = sw.elapsedMicroseconds / 1e6;
-    if (total < 4096 || sec <= 0) return (bytes: total, bps: 0);
+    if (total < 4096 || sec <= 0) return (bytes: total, bps: 0.0);
     return (bytes: total, bps: total / sec);
   } catch (_) {
-    return (bytes: 0, bps: 0);
+    return (bytes: 0, bps: 0.0);
   } finally {
     try { tls?.destroy(); } catch (_) {}
     try { relay?.destroy(); } catch (_) {}
