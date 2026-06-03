@@ -488,7 +488,11 @@ Future<List<ScanResult>> runIsolateScanEngine(
       } else if (msg is _WorkerBatch) {
         topResults.addAll(msg.results);
         if (msg.results.isNotEmpty) {
-          final denom = totalLive > 0 ? totalLive : totalIps;
+          // FIX(denom-race): only use totalLive after ALL prefilter counts are in.
+          // If first batch arrives before _WorkerPrefilterDone, totalLive is
+          // partial (could be 0). Sending 0 as denom makes main.dart skip the
+          // _total update safely until onPrefilterDone sets the real value.
+          final denom = prefilterReported ? totalLive : 0;
           for (final r in msg.results) {
             totalDone++;
             onProgress?.call(totalDone, denom, r);
