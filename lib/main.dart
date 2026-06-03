@@ -572,7 +572,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _startBatchTimer() {
     _batchTimer?.cancel();
-    _batchTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+    _batchTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (!mounted) { _batchTimer?.cancel(); return; }
       if (_pendingResults.isEmpty) return;
       setState(() {
@@ -797,10 +797,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _prefilterTotal = totalCount;
           _prefiltering   = false;
           _total          = liveCount > 0 ? liveCount : _total;
-          // FIX(prefilter-reset): do NOT reset _done here.
-          // onPrefilterDone now fires once after ALL workers; by that point
-          // many _WorkerBatch callbacks may have already incremented _done.
-          // Resetting to 0 caused the "1000 IPs, 0 done" display bug.
+          // FIX(prefilter-zero): never zero _total if onProgress already set it.
+          // If liveCount==0 (last isolate had no live IPs), keep existing _total.
           _statusText     = 'Scanning $liveCount live IPs...';
         });
       },
@@ -811,8 +809,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         // setState immediately so progress bar updates on every IP
         setState(() {
           _done = done;
-          // FIX(total-shrink): only set _total from onProgress if not yet initialised.
-          // prefilter count is the stable source of truth; never shrink it.
+          // FIX(total-shrink): _total can only grow — never let onProgress shrink it.
           if (total > _total) _total = total;
           if (done > 0 && _total > 0) {
             final pct = (done / _total * 100).round();
