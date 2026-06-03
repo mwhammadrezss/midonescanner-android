@@ -602,7 +602,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _batchTimer = null;
     if (_pendingResults.isNotEmpty && mounted) {
       setState(() {
-        _results.addAll(_pendingResults);
+        // FIX(stop-stats): update stat counters when flushing pending results.
+        // Previously only _results was updated but _okCount/_thrCount/_failCount
+        // were not — causing incorrect counts during scanning.
+        for (final r in _pendingResults) {
+          _results.add(r);
+          if (r.tier == IpTier.excellent || r.tier == IpTier.good) {
+            _okCount++;
+          } else if (r.tier == IpTier.usable || r.tier == IpTier.weak) {
+            _thrCount++;
+          } else {
+            _failCount++;
+          }
+          if (r.phase == ScanPhase.dpiFail) _dpiKills++;
+        }
         _pendingResults.clear();
         _displayDirty = true;
       });
@@ -812,7 +825,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _prefilterLive  = liveCount;
           _prefilterTotal = totalCount;
           _prefiltering   = false;
-          _total = liveCount > 0 ? liveCount : totalCount;
+          // FIX(prefilter-zero): never overwrite a valid _total with totalCount.
+          // If liveCount==0 due to a race, keep whatever _total was already set to.
+          _total = liveCount > 0 ? liveCount : _total;
           _statusText = liveCount > 0
               ? 'Scanning $liveCount live IPs...'
               : 'No live IPs on port 443 — try fewer IPs or Deep scan';
@@ -823,7 +838,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _pendingResults.add(result);
         setState(() {
           _done = done;
-          if (total > 0) _total = total;
+          // FIX(total-overwrite): only let onProgress set _total while prefiltering.
+          // After onPrefilterDone fires (_prefiltering=false), _total is the
+          // authoritative live count — onProgress must not overwrite it.
+          if (_prefiltering && total > 0) _total = total;
           if (_total > 0) {
             final pct = (done / _total * 100).round();
             _statusText = 'Scanning $pct%...';
