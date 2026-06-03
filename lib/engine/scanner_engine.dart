@@ -375,6 +375,7 @@ Future<List<ScanResult>> runScanningEngine(
   bool Function()? isCancelled,
   String? normalSniOverride,
   bool isCfScan           = false,
+  int tlsRepeats          = 0,
 }) async {
   // ── Deep mode: delegate entirely to the 7-stage deep scan engine ──────────
   if (mode == ScanMode.deep) {
@@ -470,6 +471,8 @@ Future<List<ScanResult>> runScanningEngine(
         snis: deepSnis,
         normalSniOverride: normalSniOverride,
         isCfScan: isCfScan,
+        tlsRepeats: tlsRepeats,
+        isCancelled: cancelCheck,
       );
       results.add(r);
       done++;

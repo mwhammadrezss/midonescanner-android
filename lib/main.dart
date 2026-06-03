@@ -28,7 +28,8 @@ import 'engine/range_ip_sampler.dart';
 import 'ui/range/range_history_page.dart';
 import 'dns_scanner/scanner.dart';
 import 'dns_scanner/dns_servers.dart';
-import 'engine/isolate_scan_engine.dart';
+import 'utils/scan_profiles.dart';
+import 'engine/cdn_scan_engine.dart';
 import 'engine/cf_ip_ranges.dart';
 import 'engine/cf_xray_scan_engine.dart';
 import 'xray/config_parser.dart';
@@ -241,7 +242,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _cfConfigOkMessage = '';
 
   // CDN: TLS test multiplier (1–6) — loss % shown per result
-  int _cdnTestMultiplier = 2;
+  int _cdnTestMultiplier = 3;
+
+  // Settings (persisted)
+  bool _usePersian = true;
+  String _appTheme = 'forest'; // forest | dark
+  String _selectedProfile = 'balanced';
 
   // Phase 1 results (all probed IPs)
   List<CfPhase1Result> _cfPhase1Results = [];
@@ -349,7 +355,158 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _loadRangeCidrs();
       if (mounted) _loadSavedCidrs();
+      if (mounted) _loadAppSettings();
     });
+  }
+
+  Future<void> _loadAppSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _usePersian = prefs.getString('app_lang') != 'en';
+      _appTheme = prefs.getString('app_theme') ?? 'forest';
+      _selectedProfile = prefs.getString('scan_profile') ?? 'balanced';
+      _cdnTestMultiplier = prefs.getInt('cdn_test_multiplier')?.clamp(1, 6) ?? 2;
+    });
+  }
+
+  Future<void> _saveAppSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('app_lang', _usePersian ? 'fa' : 'en');
+    await prefs.setString('app_theme', _appTheme);
+    await prefs.setString('scan_profile', _selectedProfile);
+    await prefs.setInt('cdn_test_multiplier', _cdnTestMultiplier);
+  }
+
+  String _tr(String en, String fa) => _usePersian ? fa : en;
+
+  void _showSettingsSheet() {
+    var langFa = _usePersian;
+    var theme = _appTheme;
+    var profile = _selectedProfile;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: cardColor,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(_tr('Settings', 'تنظیمات'),
+                  style: GoogleFonts.inter(
+                      color: accentLime, fontWeight: FontWeight.w800, fontSize: 18)),
+              const SizedBox(height: 16),
+              Text(_tr('Language', 'زبان'),
+                  style: GoogleFonts.inter(color: textSecond, fontSize: 12, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: _settingsChip('فارسی', langFa, () => setModal(() => langFa = true)),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _settingsChip('English', !langFa, () => setModal(() => langFa = false)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(_tr('Theme', 'تم'),
+                  style: GoogleFonts.inter(color: textSecond, fontSize: 12, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: _settingsChip(_tr('Forest', 'سبز'), theme == 'forest',
+                        () => setModal(() => theme = 'forest')),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _settingsChip(_tr('Dark', 'تیره'), theme == 'dark',
+                        () => setModal(() => theme = 'dark')),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(_tr('Scan profile', 'پروفایل اسکن'),
+                  style: GoogleFonts.inter(color: textSecond, fontSize: 12, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: kScanProfiles.map((p) {
+                  final sel = profile == p.name;
+                  return GestureDetector(
+                    onTap: () => setModal(() => profile = p.name),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: sel ? accentLime : card2Color,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: sel ? accentLime : borderColor),
+                      ),
+                      child: Text(p.label,
+                          style: GoogleFonts.inter(
+                              color: sel ? bgColor : textPrimary,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 44,
+                child: ElevatedButton(
+                  onPressed: () {
+                    setState(() {
+                      _usePersian = langFa;
+                      _appTheme = theme;
+                      _selectedProfile = profile;
+                    });
+                    _saveAppSettings();
+                    Navigator.pop(ctx);
+                    _showSnack(_tr('Settings saved', 'تنظیمات ذخیره شد'));
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: accentLime,
+                    foregroundColor: bgColor,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: Text(_tr('Save', 'ذخیره'),
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _settingsChip(String label, bool selected, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? accentLime.withOpacity(0.15) : card2Color,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: selected ? accentLime : borderColor, width: selected ? 1.5 : 1),
+        ),
+        child: Text(label,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(
+                color: selected ? accentLime : textPrimary,
+                fontWeight: FontWeight.w700,
+                fontSize: 13)),
+      ),
+    );
   }
 
   @override
@@ -598,7 +755,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _pendingResults.clear();
         _displayDirty = true;
         final pct = _total > 0 ? (_done / _total * 100).round() : 0;
-        _statusText = 'Scanning $pct%...';
+        _statusText = _tr('Scanning $pct%...', 'اسکن $pct% — ETA ${_calcEta()}');
       });
     });
   }
@@ -751,8 +908,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _lastNotifPct = -1;
     _scanStartTime = DateTime.now(); // p43
     _dpiKills = 0; // p36 reset
-    // Platform-aware concurrency: Windows/desktop gets higher limits
-    final effectiveConcurrency = (Platform.isWindows || Platform.isLinux || Platform.isMacOS) ? 32 : 8;
     setState(() {
       _scanning = true;
       _cancelled = false;
@@ -770,111 +925,102 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _cachedDisplay  = [];
       _advancedFilter = 'all';   // reset filter on new scan
       _coloFilter     = '';      // reset colo search on new scan
-      _statusText = 'Pre-filtering ${ips.length} IPs...';
+      _statusText = _tr('Pre-filtering ${ips.length} IPs...', 'پیش‌فیلتر ${ips.length} IP...');
     });
 
     _startBatchTimer();
 
-    // SNI override for range scan (profile-based); CDN uses engine default (kShiroSni)
-    String? normalSniOverride;
-    bool isCfScan;
-    if (isRangeScan) {
-      isCfScan = rangeCfMode;
-      normalSniOverride = rangeCfMode ? 'speed.cloudflare.com' : null;
-    } else {
-      // CDN: ShirKhorshid/Akamai — default google.com SNI; deep probes multi-SNI
-      isCfScan = false;
-      normalSniOverride = _cdnSubMode == CdnSubMode.normal ? null : null;
+    final profile = getProfile(_selectedProfile);
+    final concurrency = (Platform.isWindows || Platform.isLinux || Platform.isMacOS)
+        ? 32
+        : profile.concurrency;
+
+    void onPrefilterDone(int liveCount, int totalCount) {
+      if (!mounted) return;
+      setState(() {
+        _prefilterLive  = liveCount;
+        _prefilterTotal = totalCount;
+        _prefiltering   = false;
+        _total          = liveCount > 0 ? liveCount : totalCount;
+        _done           = 0;
+        _statusText = liveCount > 0
+            ? _tr('Scanning $liveCount live IPs...', 'در حال اسکن $liveCount IP زنده...')
+            : _tr('No TCP live IPs', 'هیچ IP زنده‌ای پیدا نشد');
+      });
     }
 
-    runIsolateScanEngine(
-      ips,
-      mode: _cdnSubMode == CdnSubMode.deep ? ScanMode.deep : ScanMode.normal,
-      deepSnis: deepSnis,
-      normalSniOverride: normalSniOverride,
-      isCfScan: isCfScan,
-      tlsRepeats: _cdnTestMultiplier,
-      onPrefilterDone: (liveCount, totalCount) {
-        if (!mounted) return;
-        if (liveCount == 0) {
-          _cancelled = true;
-          setState(() {
-            _prefilterLive  = 0;
-            _prefilterTotal = totalCount;
-            _prefiltering   = false;
-            _scanning       = false;
-            _total          = totalCount;
-            _done           = totalCount;
-            _results        = [];
-            _statusText =
-                'No TCP live IPs ($totalCount checked). Try other IPs or Deep scan.';
-          });
-          _stopBatchTimer();
-          _showSnack('No live IPs after pre-filter — check list or network');
-          return;
-        }
-        setState(() {
-          _prefilterLive  = liveCount;
-          _prefilterTotal = totalCount;
-          _prefiltering   = false;
-          _total          = liveCount;
-          _statusText     = 'TLS testing $liveCount live IPs (×$_cdnTestMultiplier)...';
-        });
-      },
-      onProgress: (done, total, result) {
-        if (!mounted) return;
-        // start event (done==0): just reset totals, no result to add
-        if (done > 0) _pendingResults.add(result);
-        // setState immediately so progress bar updates on every IP
-        setState(() {
-          _done = done;
-          // FIX(total-shrink): only set _total from onProgress if not yet initialised.
-          // prefilter count is the stable source of truth; never shrink it.
-          if (_total == 0) _total = total;
-          if (done > 0 && _total > 0) {
-            final pct = (done / _total * 100).round();
-            _statusText = 'Scanning $pct%...';
-          }
-        });
-        final pct = total > 0 ? (done / total * 100).round() : 0;
-        final milestone = (pct ~/ 25) * 25;
-        if (milestone > _lastNotifPct && milestone > 0) {
-          _lastNotifPct = milestone;
-          if (pct >= 100) {
-            if (Platform.isAndroid) sendNotification('✅ اسکن تموم شد!', 'نتایج آماده‌ست.');
-          } else {
-            if (Platform.isAndroid) sendNotification('در حال اسکن... $pct%', 'MidONe داره در پس‌زمینه کار می‌کنه');
-          }
-        }
-      },
-      // FIX BUG#1: _paused must NOT kill isolates — only _cancelled should.
-      // Pause is handled at the batch-timer/UI level; isolates keep scanning.
-      isCancelled: () => _cancelled,
-    ).then((results) {
+    void onProgress(int done, int total, ScanResult result) {
       if (!mounted) return;
-      if (_cancelled && results.isEmpty && _prefilterLive == 0) return;
+      _pendingResults.add(result);
+      _done = done;
+      _total = total;
+      final pct = total > 0 ? (done / total * 100).round() : 0;
+      final milestone = (pct ~/ 25) * 25;
+      if (milestone > _lastNotifPct && milestone > 0) {
+        _lastNotifPct = milestone;
+        if (pct >= 100) {
+          if (Platform.isAndroid) sendNotification('✅ اسکن تموم شد!', 'نتایج آماده‌ست.');
+        } else {
+          if (Platform.isAndroid) sendNotification('در حال اسکن... $pct%', 'MidONe داره در پس‌زمینه کار می‌کنه');
+        }
+      }
+    }
+
+    final Future<List<ScanResult>> scanFuture = isRangeScan
+        ? runScanningEngine(
+            ips,
+            mode: ScanMode.normal,
+            concurrency: concurrency,
+            deepSnis: deepSnis,
+            normalSniOverride:
+                rangeCfMode ? 'speed.cloudflare.com' : null,
+            isCfScan: rangeCfMode,
+            tlsRepeats: _cdnTestMultiplier,
+            onPrefilterDone: onPrefilterDone,
+            onProgress: onProgress,
+            isCancelled: () => _cancelled,
+          )
+        : runCdnScanEngine(
+            ips,
+            mode: _cdnSubMode == CdnSubMode.deep ? ScanMode.deep : ScanMode.normal,
+            concurrency: concurrency,
+            deepSnis: deepSnis,
+            tlsRepeats: _cdnTestMultiplier,
+            onPrefilterDone: onPrefilterDone,
+            onProgress: onProgress,
+            isCancelled: () => _cancelled,
+          );
+
+    scanFuture.then((results) {
+      if (!mounted) return;
       _stopBatchTimer();
       setState(() {
         _results = results;
         _scanning = false;
         _prefiltering = false;
         _displayDirty = true;
-        _done = results.length > 0 ? results.length : _done;
+        _done = results.length;
         _okCount   = results.where((r) => r.tier == IpTier.excellent || r.tier == IpTier.good).length;
         _thrCount  = results.where((r) => r.tier == IpTier.usable || r.tier == IpTier.weak).length;
         _failCount = results.where((r) => r.tier == IpTier.dead).length;
         final usable = results.where((r) => r.isAlive).length;
-        final scanned = results.isNotEmpty ? results.length : _done;
+        final scanned = results.length;
         _statusText = scanned > 0
-            ? 'Done! $usable usable — $scanned scanned'
-            : 'Done! 0 usable — 0 scanned (check IPs or try Deep)';
+            ? _tr('Done! $usable usable / $scanned scanned', 'تمام! $usable قابل استفاده از $scanned اسکن‌شده')
+            : _tr('Done! 0 results (try Deep or other IPs)', 'تمام! 0 نتیجه (Deep یا IP دیگر امتحان کن)');
       });
       final aliveN = results.where((r) => r.isAlive).length;
       if (results.isNotEmpty) {
-        _showSnack('Done: $aliveN usable / ${results.length} scanned');
+        _showSnack(_tr('Done: $aliveN usable / ${results.length} scanned',
+            'تمام: $aliveN قابل استفاده از ${results.length} اسکن'));
         Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) setState(() => _tab = 1);
         });
+      } else {
+        _showSnack(_tr(
+          'Scan finished with 0 results. Try other IPs or Deep mode.',
+          'اسکن تمام شد ولی 0 نتیجه. IP دیگر یا حالت Deep امتحان کن.',
+        ));
       }
       if (isRangeScan) {
         RangeScanStorage().addScannedIps(ips).then((_) {
@@ -916,7 +1062,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }).catchError((e) {
       if (!mounted) return;
       _stopBatchTimer();
-      setState(() { _scanning = false; _prefiltering = false; });
+      setState(() {
+        _scanning = false;
+        _prefiltering = false;
+        _statusText = _tr('Scan error: $e', 'خطای اسکن: $e');
+      });
+      _showSnack(_tr('Scan error: $e', 'خطای اسکن: $e'));
     });
   }
 
@@ -1294,10 +1445,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     ));
   }
 
+  Color get _scaffoldBg =>
+      _appTheme == 'dark' ? const Color(0xFF050808) : bgColor;
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: bgColor,
+      backgroundColor: _scaffoldBg,
       body: SafeArea(
         child: Stack(
           children: [
@@ -1363,6 +1517,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
           const Spacer(),
+          IconButton(
+            icon: const Icon(Icons.settings_rounded, color: textSecond, size: 22),
+            tooltip: _tr('Settings', 'تنظیمات'),
+            onPressed: _showSettingsSheet,
+          ),
           GestureDetector(
             onTap: () async {
               final uri = Uri.parse('https://t.me/mmdrlx');
@@ -1514,7 +1673,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 child: Padding(
                   padding: EdgeInsets.only(right: n < 6 ? 4 : 0),
                   child: GestureDetector(
-                    onTap: () => setState(() => _cdnTestMultiplier = n),
+                    onTap: () {
+                      setState(() => _cdnTestMultiplier = n);
+                      _saveAppSettings();
+                    },
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       decoration: BoxDecoration(
