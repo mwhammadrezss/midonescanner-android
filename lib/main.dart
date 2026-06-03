@@ -185,7 +185,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   final _ipController = TextEditingController();
   List<ScanResult> _results = [];
-  String _statusText = _tr(_tr('Ready to scan...', 'آماده اسکن...'), 'آماده اسکن...');
+  String _statusText = 'آماده اسکن...';
   String _sortBy = 'speed';  // default: sort by score
   // BUG 9 FIX: removed _filterThrottled — dead code, no UI toggle existed.
   // The 'alive' advanced filter covers this use case.
@@ -218,7 +218,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _cfScanning = false;
   bool _cfCancelled = false;
   int _cfDone = 0, _cfTotal = 0;
-  String _cfStatus = _tr(_tr('Ready to scan Cloudflare IPs...', 'آماده اسکن IP‌های کلودفلر...'), 'آماده اسکن IP‌های کلودفلر...');
+  String _cfStatus = 'آماده اسکن IP‌های کلودفلر...';
 
   // ── CF Xray scanner state (SenPai-style two-phase) ────────────────────────
   // Config URL for Xray phase-2 validation
@@ -367,6 +367,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _appTheme = prefs.getString('app_theme') ?? 'forest';
       _selectedProfile = prefs.getString('scan_profile') ?? 'balanced';
       _cdnTestMultiplier = prefs.getInt('cdn_test_multiplier')?.clamp(1, 6) ?? 2;
+      // Update initial status texts to match loaded language
+      if (!_scanning) _statusText = _usePersian ? 'آماده اسکن...' : 'Ready to scan...';
+      if (!_cfScanning) _cfStatus = _usePersian ? 'آماده اسکن IP‌های کلودفلر...' : 'Ready to scan Cloudflare IPs...';
     });
   }
 
@@ -1251,7 +1254,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // p44: pause scan
   void _pauseScan() {
-    setState(() { _paused = true; _statusText = _tr(_tr('Paused...', 'مکث...'), 'مکث...'); });
+    setState(() { _paused = true; _statusText = _tr('Paused...', 'مکث...'); });
   }
 
   // p44: resume scan
@@ -1262,7 +1265,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!_paused) return;
     setState(() {
       _paused = false;
-      _statusText = _tr(_tr('Resumed...', 'ادامه...'), 'ادامه...');
+      _statusText = _tr('Resumed...', 'ادامه...');
     });
   }
 
