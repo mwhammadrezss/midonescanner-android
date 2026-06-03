@@ -553,7 +553,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         backgroundColor: cardColor,
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(24),
-            side: const BorderSide(color: borderColor)),
+            side: BorderSide(color: borderColor)),
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
@@ -1148,7 +1148,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                     child: Row(
                       children: [
-                        const Icon(Icons.tune_rounded, color: accentLime, size: 20),
+                        Icon(Icons.tune_rounded, color: accentLime, size: 20),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(_l.deepSniTitle,
@@ -1162,7 +1162,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ],
                     ),
                   ),
-                  const Divider(color: borderColor, height: 1),
+                  Divider(color: borderColor, height: 1),
                   Flexible(
                     child: ListView(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1202,13 +1202,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                       horizontal: 14, vertical: 10),
                                   border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
-                                      borderSide: const BorderSide(color: borderColor)),
+                                      borderSide: BorderSide(color: borderColor)),
                                   enabledBorder: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
-                                      borderSide: const BorderSide(color: borderColor)),
+                                      borderSide: BorderSide(color: borderColor)),
                                   focusedBorder: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
-                                      borderSide: const BorderSide(color: accentLime)),
+                                      borderSide: BorderSide(color: accentLime)),
                                 ),
                               ),
                             ),
@@ -1840,8 +1840,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               hintStyle: GoogleFonts.robotoMono(color: textSecond, fontSize: 12),
               filled: true, fillColor: card2Color,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: accentLime, width: 1.5)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: borderColor, width: 1)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: accentLime, width: 1.5)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: borderColor, width: 1)),
               contentPadding: const EdgeInsets.all(14),
             ),
           ),
@@ -1926,7 +1926,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 filled: true, fillColor: card2Color,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                 focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF00E5FF), width: 1.5)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: borderColor, width: 1)),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: borderColor, width: 1)),
                 contentPadding: const EdgeInsets.all(14),
               ),
             ),
@@ -2187,11 +2187,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   const SizedBox(width: 8),
                   OutlinedButton.icon(
                     onPressed: _importCfIpsFromFile,
-                    icon: const Icon(Icons.upload_file_rounded, size: 16, color: accentLime),
+                    icon: Icon(Icons.upload_file_rounded, size: 16, color: accentLime),
                     label: Text('Import IPs',
                         style: GoogleFonts.inter(color: accentLime, fontSize: 12, fontWeight: FontWeight.w600)),
                     style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: accentLime),
+                      side: BorderSide(color: accentLime),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                   ),
@@ -4105,7 +4105,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(8), border: Border.all(color: borderColor)),
                   child: Row(children: [
-                    const Icon(Icons.history_rounded, color: accentLime, size: 14),
+                    Icon(Icons.history_rounded, color: accentLime, size: 14),
                     const SizedBox(width: 4),
                     Text(_l.history, style: GoogleFonts.inter(color: accentLime, fontSize: 11, fontWeight: FontWeight.w600)),
                   ]),
@@ -4214,7 +4214,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.playlist_add_check_rounded, color: accentLime, size: 14),
+                  Icon(Icons.playlist_add_check_rounded, color: accentLime, size: 14),
                   const SizedBox(width: 6),
                   Text(_l.rangesSelected(_selectedRangeCidrs.length),
                       style: GoogleFonts.inter(color: accentLime, fontSize: 11, fontWeight: FontWeight.w600)),
@@ -4241,13 +4241,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               hintStyle: GoogleFonts.robotoMono(color: textSecond, fontSize: 12),
               filled: true, fillColor: card2Color,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: accentLime, width: 1.5)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: borderColor, width: 1)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: accentLime, width: 1.5)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderColor, width: 1)),
               errorText: _customCidrError,
               contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
               suffixIcon: _customCidrController.text.isNotEmpty
                   ? IconButton(
-                      icon: const Icon(Icons.clear_rounded, size: 16, color: textSecond),
+                      icon: Icon(Icons.clear_rounded, size: 16, color: textSecond),
                       onPressed: () => setState(() { _customCidrController.clear(); _customCidrError = null; }),
                     )
                   : null,
@@ -4272,11 +4272,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     final cidr = _customCidrController.text.trim();
                     if (cidr.isNotEmpty) _saveCidr(cidr.contains('/') ? cidr : '$cidr/32');
                   },
-                  icon: const Icon(Icons.bookmark_add_rounded, size: 16, color: accentLime),
+                  icon: Icon(Icons.bookmark_add_rounded, size: 16, color: accentLime),
                   label: Text('ذخیره این رنج', textDirection: TextDirection.rtl,
                       style: GoogleFonts.inter(color: accentLime, fontSize: 12, fontWeight: FontWeight.w600)),
                   style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: accentLime, width: 1),
+                    side: BorderSide(color: accentLime, width: 1),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     backgroundColor: accentLime.withOpacity(0.06),
                   ),
@@ -4298,7 +4298,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(7), border: Border.all(color: borderColor)),
                   child: Row(children: [
-                    const Icon(Icons.upload_file_rounded, color: accentLime, size: 13),
+                    Icon(Icons.upload_file_rounded, color: accentLime, size: 13),
                     const SizedBox(width: 3),
                     Text('Import', style: GoogleFonts.inter(color: accentLime, fontSize: 10, fontWeight: FontWeight.w600)),
                   ]),
@@ -4930,7 +4930,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               style: ElevatedButton.styleFrom(
                 backgroundColor: iconBg,
                 foregroundColor: accentLime,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: borderColor)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: borderColor)),
                 elevation: 0, padding: EdgeInsets.zero,
               ),
               child: Icon(_paused ? Icons.play_arrow_rounded : Icons.pause_rounded, size: 22),
@@ -5023,7 +5023,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             const SizedBox(height: 6),
             Row(
               children: [
-                const Icon(Icons.lan_rounded, size: 12, color: textSecond),
+                Icon(Icons.lan_rounded, size: 12, color: textSecond),
                 const SizedBox(width: 4),
                 Text('Top subnet: $topSubnet',
                     style: GoogleFonts.robotoMono(color: textSecond, fontSize: 11)),
@@ -5082,7 +5082,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           backgroundColor: cardInner, foregroundColor: accentLime,
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
-              side: const BorderSide(color: borderColor)),
+              side: BorderSide(color: borderColor)),
           elevation: 0,
         ),
         child: Row(
@@ -5224,7 +5224,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       color: cardColor,
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          side: const BorderSide(color: borderColor)),
+          side: BorderSide(color: borderColor)),
       onSelected: (val) {
         if (val == 'top5') _copyTop5();
         if (val == 'all') _copyAll();
@@ -5233,7 +5233,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         PopupMenuItem(
           value: 'top5',
           child: Row(children: [
-            const Icon(Icons.filter_5_rounded, color: accentLime, size: 18),
+            Icon(Icons.filter_5_rounded, color: accentLime, size: 18),
             const SizedBox(width: 8),
             Text('Copy Top 5', style: GoogleFonts.inter(color: textPrimary, fontWeight: FontWeight.w600, fontSize: 13)),
           ]),
@@ -5241,7 +5241,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         PopupMenuItem(
           value: 'all',
           child: Row(children: [
-            const Icon(Icons.copy_all_rounded, color: accentLime, size: 18),
+            Icon(Icons.copy_all_rounded, color: accentLime, size: 18),
             const SizedBox(width: 8),
             Text('Copy All', style: GoogleFonts.inter(color: textPrimary, fontWeight: FontWeight.w600, fontSize: 13)),
           ]),
@@ -5258,7 +5258,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           children: [
             Text('Copy', style: GoogleFonts.inter(color: accentLime, fontSize: 11, fontWeight: FontWeight.w600)),
             const SizedBox(width: 3),
-            const Icon(Icons.expand_more_rounded, color: accentLime, size: 14),
+            Icon(Icons.expand_more_rounded, color: accentLime, size: 14),
           ],
         ),
       ),
@@ -5464,7 +5464,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.refresh_rounded, size: 12, color: accentLime),
+                      Icon(Icons.refresh_rounded, size: 12, color: accentLime),
                       const SizedBox(width: 4),
                       Text('Retest', style: GoogleFonts.inter(color: accentLime, fontSize: 10, fontWeight: FontWeight.w600)),
                     ],
