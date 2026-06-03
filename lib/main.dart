@@ -151,7 +151,7 @@ class MidOneScannerApp extends StatelessWidget {
           onSurface: textPrimary,
         ),
         appBarTheme: AppBarTheme(backgroundColor: card2Color, foregroundColor: textPrimary),
-        dialogTheme: DialogThemeData(backgroundColor: cardColor),
+        dialogTheme: DialogTheme(backgroundColor: cardColor),
         snackBarTheme: SnackBarThemeData(backgroundColor: accentLime, contentTextStyle: TextStyle(color: bgColor)),
         textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme).apply(bodyColor: textPrimary, displayColor: textPrimary),
       ),
@@ -4139,7 +4139,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           const SizedBox(height: 8),
 
           if (_loadingRangeCidrs)
-            const Center(child: Padding(padding: EdgeInsets.all(12),
+            Center(child: Padding(padding: const EdgeInsets.all(12),
                 child: SizedBox(width: 20, height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2, color: accentLime))))
           else if (_rangeCidrs.isEmpty)
@@ -4407,7 +4407,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ],
 
           if (_loadingSavedCidrs)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 8),
+            Padding(padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Center(child: SizedBox(width: 16, height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2, color: accentLime))))
           else if (_savedCidrs.isEmpty)
