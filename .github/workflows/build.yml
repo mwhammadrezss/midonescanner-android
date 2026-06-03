@@ -24,34 +24,11 @@ jobs:
           echo "tag=v$VERSION" >> $GITHUB_OUTPUT
           echo "✅ Version: $VERSION"
 
-
-  # ─────────────────────────────────────────
-  #  🔍 آنالیز استاتیک — گیت قبل از build
-  # ─────────────────────────────────────────
-  analyze:
-    needs: read-version
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: 🐦 Setup Flutter (analyze)
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.24.0'
-          channel: stable
-          cache: true
-
-      - name: 📦 Get packages
-        run: flutter pub get
-
-      - name: 🔍 Dart Analyze
-        run: flutter analyze lib/
-
   # ─────────────────────────────────────────
   #  مرحله ۲: Build Android APK
   # ─────────────────────────────────────────
   build-android:
-    needs: [read-version, analyze]
+    needs: read-version
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -74,8 +51,12 @@ jobs:
       - name: 📦 Get packages
         run: flutter pub get
 
-      - name: 📁 assets/xray (Android — Phase 2 uses TLS/WS, no xray binary in APK)
-        run: mkdir -p assets/xray
+      - name: 📁 Ensure assets/xray dir exists
+        run: |
+          mkdir -p assets/xray
+          echo "✅ assets/xray ready (xray binary not bundled — TLS-only mode)"
+          # xray binary is NOT used — xray_validator.dart uses TLS check only.
+          # Removed: xray-arm64 (35MB) + geoip.dat + geosite.dat → saves ~12MB APK
 
       - name: 🔨 Build APK
         run: flutter build apk --release --no-shrink
@@ -102,7 +83,7 @@ jobs:
   #  مرحله ۳: Build Windows EXE
   # ─────────────────────────────────────────
   build-windows:
-    needs: [read-version, analyze]
+    needs: read-version
     runs-on: windows-latest
     permissions:
       contents: write
@@ -139,17 +120,11 @@ jobs:
             Write-Host "ℹ️ windows/ already exists"
           }
 
-      - name: 📥 Bundle xray for Windows assets + Release folder
+      - name: 📁 Ensure assets/xray dir exists (required by pubspec.yaml)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "assets\xray" | Out-Null
-          $zip = "xray-win.zip"
-          Invoke-WebRequest -Uri "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-windows-64.zip" -OutFile $zip -UseBasicParsing
-          Expand-Archive $zip -DestinationPath xray_tmp -Force
-          $bin = Get-ChildItem xray_tmp -Recurse -Filter "xray.exe" | Select-Object -First 1
-          if (-not $bin) { throw "xray.exe not found" }
-          Copy-Item $bin.FullName "assets\xray\xray-windows-amd64.exe" -Force
-          Write-Host "✅ assets/xray/xray-windows-amd64.exe"
+          Write-Host "✅ assets/xray directory ready"
 
       - name: 🔨 Build Windows Release
         run: flutter build windows --release

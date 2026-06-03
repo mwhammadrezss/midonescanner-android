@@ -1,9 +1,5 @@
 // lib/engine/isolate_scan_engine.dart
 // ─── Multi-Isolate Parallel Scan Engine ──────────────────────────────────────
-//
-// Large IP lists: prefilter runs once on the main isolate (global socket cap),
-// then scan workers only probe live IPs — avoids N-isolate prefilter stampedes
-// on Android that marked every IP dead and left progress at 0/N.
 
 import 'dart:async';
 import 'dart:io';
@@ -16,12 +12,11 @@ import 'package:flutter/services.dart' show rootBundle;
 import '../models/scan_result.dart';
 import '../geo/geoip.dart';
 import 'scanner_engine.dart';
+import 'soft_blacklist.dart';
 import 'subnet_cache.dart';
 import 'adaptive_concurrency.dart';
 import 'range/fast_probe_engine.dart';
 import 'concurrency_engine.dart';
-
-// ─── Platform-aware config ────────────────────────────────────────────────────
 
 int get _numCpuCores {
   try {
@@ -43,50 +38,24 @@ int get _isolateConcurrency {
   return 20;
 }
 
-/// Fewer isolates on large lists → less aggregate socket pressure during TLS scan.
-int _isolatesForIpCount(int totalIps) {
-  final cap = _maxIsolates;
-  if (Platform.isAndroid) {
-    if (totalIps <= 16) return 1;
-    if (totalIps <= 128) return min(cap, 2);
-    return min(cap, 2);
+int get _isolatePrefilterConcurrency {
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) return 120;
+  return 60;
+}
+
+/// Process [items] in chunks to avoid OOM from huge Future.wait lists.
+Future<void> _forEachBatched<T>(
+  List<T> items,
+  Future<void> Function(T item) fn, {
+  int batchSize = 80,
+  bool Function()? shouldStop,
+}) async {
+  for (var i = 0; i < items.length; i += batchSize) {
+    if (shouldStop?.call() == true) return;
+    final end = min(i + batchSize, items.length);
+    await Future.wait(items.sublist(i, end).map(fn));
   }
-  if (totalIps <= 32) return min(cap, max(1, totalIps));
-  if (totalIps <= 256) return min(cap, 4);
-  if (totalIps <= 2000) return min(cap, 4);
-  return min(cap, 2);
 }
-
-/// Main-isolate TCP prefilter concurrency (single global cap).
-int _mainPrefilterConcurrency(int totalIps) {
-  if (Platform.isAndroid) {
-    if (totalIps > 2000) return 16;
-    if (totalIps > 500) return 24;
-    if (totalIps > 100) return 32;
-    return 40;
-  }
-  if (totalIps > 2000) return 48;
-  if (totalIps > 500) return 64;
-  return 96;
-}
-
-int _prefilterBatchSizeFor(int totalIps) {
-  if (Platform.isAndroid && totalIps > 200) return 32;
-  return _prefilterBatchSize;
-}
-
-int _scanConcurrencyFor(int totalIps, int numIsolates) {
-  final base = _isolateConcurrency;
-  if (totalIps <= 64) return base;
-  if (totalIps <= 500) return min(base, 24);
-  return min(base, max(8, base ~/ 2));
-}
-
-const int _prefilterTimeoutMs = 3000;
-const int _prefilterBatchSize = 48;
-const int _scanBatchSize = 32;
-
-// ─── Message types (Isolate ↔ Main) ──────────────────────────────────────────
 
 class _WorkerConfig {
   final SendPort replyPort;
@@ -97,6 +66,8 @@ class _WorkerConfig {
   final String? normalSniOverride;
   final bool isCfScan;
   final int concurrency;
+  final int prefilterConcurrency;
+  final int tlsRepeats;
   final Uint8List? geoipBytes;
 
   const _WorkerConfig({
@@ -108,20 +79,31 @@ class _WorkerConfig {
     this.normalSniOverride,
     this.isCfScan = false,
     required this.concurrency,
+    required this.prefilterConcurrency,
+    this.tlsRepeats = 2,
     this.geoipBytes,
   });
 }
 
 class _WorkerReady {
   final SendPort cancelPort;
-  const _WorkerReady(this.cancelPort);
+  final int workerIndex;
+  const _WorkerReady(this.cancelPort, this.workerIndex);
+}
+
+class _WorkerPrefilterDone {
+  final int liveCount;
+  final int totalCount;
+  final int workerIndex;
+  const _WorkerPrefilterDone(this.liveCount, this.totalCount, this.workerIndex);
 }
 
 class _WorkerBatch {
   final List<ScanResult> results;
   final int workerDone;
   final int workerTotal;
-  const _WorkerBatch(this.results, this.workerDone, this.workerTotal);
+  final int workerIndex;
+  const _WorkerBatch(this.results, this.workerDone, this.workerTotal, this.workerIndex);
 }
 
 class _WorkerDone {
@@ -134,8 +116,6 @@ class _WorkerResult {
   final int workerIndex;
   const _WorkerResult({required this.results, required this.workerIndex});
 }
-
-// ─── Top-N result retention ───────────────────────────────────────────────────
 
 class _TopNResults {
   final int maxCapacity;
@@ -168,57 +148,13 @@ class _TopNResults {
   }
 }
 
-// ─── Batched prefilter (TCP :443) ─────────────────────────────────────────────
-
-Future<List<String>> _batchedPrefilter({
-  required List<String> ips,
-  required FastProbeEngine fastProbe,
-  required Semaphore sem,
-  required bool Function() isCancelled,
-  required void Function(int done, int total)? onBatchProgress,
-  int? batchSize,
-}) async {
-  final batchSz = batchSize ?? _prefilterBatchSize;
-  final interBatchMs = (Platform.isAndroid && ips.length > 128)
-      ? 40
-      : (ips.length > 128 ? 25 : 0);
-  final live = <String>[];
-  for (int i = 0; i < ips.length; i += batchSz) {
-    if (isCancelled()) break;
-    final batch = ips.sublist(i, min(i + batchSz, ips.length));
-    final batchLive = await Future.wait(batch.map((ip) async {
-      if (isCancelled()) return null;
-      await sem.acquire();
-      try {
-        if (isCancelled()) return null;
-        final r = await fastProbe.probe(ip, timeoutMs: _prefilterTimeoutMs);
-        // Do NOT SoftBlacklist / SubnetMemoryCache on TCP-only prefilter —
-        // failures are often socket pressure, not the IP being dead.
-        return r.alive ? ip : null;
-      } catch (_) {
-        return null;
-      } finally {
-        sem.release();
-      }
-    }));
-    live.addAll(batchLive.whereType<String>());
-    onBatchProgress?.call(min(i + batch.length, ips.length), ips.length);
-    if (interBatchMs > 0 && i + batchSz < ips.length) {
-      await Future.delayed(Duration(milliseconds: interBatchMs));
-    }
-  }
-  return live;
-}
-
-// ─── Worker Isolate entry point ───────────────────────────────────────────────
-
 Future<void> _workerMain(_WorkerConfig config) async {
   final _cancelPort = ReceivePort();
   bool _localCancelled = false;
   _cancelPort.listen((msg) {
     if (msg == 'cancel') _localCancelled = true;
   });
-  config.replyPort.send(_WorkerReady(_cancelPort.sendPort));
+  config.replyPort.send(_WorkerReady(_cancelPort.sendPort, config.workerIndex));
 
   bool cancelled() => _localCancelled;
 
@@ -230,12 +166,39 @@ Future<void> _workerMain(_WorkerConfig config) async {
     }
 
     final results = <ScanResult>[];
-    final liveIps = config.ips;
+    final fastProbe = FastProbeEngine(defaultTimeoutMs: 2000);
+    final prefilterSem = Semaphore(config.prefilterConcurrency);
+    final liveIps = <String>[];
 
-    if (liveIps.isEmpty) {
+    await _forEachBatched<String>(
+      config.ips,
+      (ip) async {
+        if (cancelled()) return;
+        await prefilterSem.acquire();
+        try {
+          if (cancelled()) return;
+          final r = await fastProbe.probe(ip, timeoutMs: 2000);
+          if (r.alive) {
+            liveIps.add(ip);
+          } else {
+            try { SoftBlacklist().recordFailure(ip); } catch (_) {}
+            try { SubnetMemoryCache().recordFailure(ip); } catch (_) {}
+          }
+        } catch (_) {
+        } finally {
+          prefilterSem.release();
+        }
+      },
+      batchSize: 100,
+      shouldStop: cancelled,
+    );
+
+    config.replyPort.send(
+        _WorkerPrefilterDone(liveIps.length, config.ips.length, config.workerIndex));
+
+    if (liveIps.isEmpty || cancelled()) {
       config.replyPort.send(
-        _WorkerResult(results: [], workerIndex: config.workerIndex),
-      );
+          _WorkerResult(results: results, workerIndex: config.workerIndex));
       config.replyPort.send(_WorkerDone(config.workerIndex));
       return;
     }
@@ -244,94 +207,87 @@ Future<void> _workerMain(_WorkerConfig config) async {
     adaptiveCtrl.seed(config.concurrency);
     final scanSem = Semaphore(config.concurrency);
     final total = liveIps.length;
-
     int done = 0;
     final batch = <ScanResult>[];
     const batchSize = 5;
 
-    for (int i = 0; i < liveIps.length; i += _scanBatchSize) {
-      if (cancelled()) break;
-      final ipBatch = liveIps.sublist(i, min(i + _scanBatchSize, liveIps.length));
+    Future<void> flushBatch() async {
+      if (batch.isEmpty) return;
+      config.replyPort.send(
+          _WorkerBatch(List.from(batch), done, total, config.workerIndex));
+      batch.clear();
+    }
 
-      await Future.wait(ipBatch.map((ip) async {
+    await _forEachBatched<String>(
+      liveIps,
+      (ip) async {
         if (cancelled()) return;
-
         bool acquired = false;
         try {
           await scanSem.acquire();
           acquired = true;
           if (cancelled()) return;
 
-          ScanResult r;
-          try {
-            r = await scanOneIp(
-              ip,
-              mode: config.mode,
-              snis: config.deepSnis,
-              normalSniOverride: config.normalSniOverride,
-              isCfScan: config.isCfScan,
-              isCancelled: cancelled,
-            );
-          } catch (_) {
-            r = ScanResult(
-              ip: ip,
-              latencyMs: 9999,
-              jitterMs: 0,
-              isAlive: false,
-              grade: 'F',
-              country: '',
-              flag: '',
-              loss: 100,
-              reliability: 0,
-              score: 0,
-              survivalMs: 0,
-              retransmits: 0,
-              phase: ScanPhase.tlsFail,
-              tier: IpTier.dead,
-            );
-          }
-
+          final r = await scanOneIp(
+            ip,
+            mode: config.mode,
+            snis: config.deepSnis,
+            normalSniOverride: config.normalSniOverride,
+            isCfScan: config.isCfScan,
+            isCancelled: cancelled,
+            tlsRepeats: config.tlsRepeats,
+          );
           results.add(r);
           done++;
           batch.add(r);
-          if (batch.length >= batchSize) {
-            config.replyPort.send(_WorkerBatch(List.from(batch), done, total));
-            batch.clear();
-          }
-          if (r.isAlive) {
-            adaptiveCtrl.recordSuccess();
-          } else {
-            adaptiveCtrl.recordError();
-          }
+          if (batch.length >= batchSize) await flushBatch();
+          if (r.isAlive) adaptiveCtrl.recordSuccess();
+          else adaptiveCtrl.recordError();
+        } catch (_) {
+          done++;
+          final dead = ScanResult(
+            ip: ip,
+            latencyMs: 9999,
+            jitterMs: 0,
+            isAlive: false,
+            grade: 'F',
+            country: '',
+            flag: '',
+            loss: 100,
+            reliability: 0,
+            score: 0,
+            survivalMs: 0,
+            retransmits: 0,
+            phase: ScanPhase.tlsFail,
+            tier: IpTier.dead,
+          );
+          results.add(dead);
+          batch.add(dead);
+          if (batch.length >= batchSize) await flushBatch();
         } finally {
           if (acquired) scanSem.release();
         }
-      }));
-
-      if (liveIps.length > 64 && i + _scanBatchSize < liveIps.length) {
-        await Future.delayed(const Duration(milliseconds: 30));
-      }
-    }
-
-    if (batch.isNotEmpty) {
-      config.replyPort.send(_WorkerBatch(List.from(batch), done, total));
-    }
-
-    config.replyPort.send(
-      _WorkerResult(results: results, workerIndex: config.workerIndex),
+      },
+      batchSize: 50,
+      shouldStop: cancelled,
     );
+
+    await flushBatch();
+
+    // Recovery path: if batches were lost, main can still merge full results
+    if (results.isNotEmpty && done > 0) {
+      config.replyPort.send(
+          _WorkerResult(results: results, workerIndex: config.workerIndex));
+    }
     config.replyPort.send(_WorkerDone(config.workerIndex));
   } catch (_) {
     config.replyPort.send(
-      _WorkerResult(results: [], workerIndex: config.workerIndex),
-    );
+        _WorkerResult(results: [], workerIndex: config.workerIndex));
     config.replyPort.send(_WorkerDone(config.workerIndex));
   } finally {
     _cancelPort.close();
   }
 }
-
-// ─── Main entry point ─────────────────────────────────────────────────────────
 
 Future<List<ScanResult>> runIsolateScanEngine(
   List<String> ips, {
@@ -339,12 +295,17 @@ Future<List<ScanResult>> runIsolateScanEngine(
   List<String>? deepSnis,
   void Function(int done, int total, ScanResult result)? onProgress,
   void Function(int liveCount, int totalCount)? onPrefilterDone,
-  void Function(int done, int total)? onPrefilterProgress,
   bool Function()? isCancelled,
   String? normalSniOverride,
   bool isCfScan = false,
+  int tlsRepeats = 2,
 }) async {
   if (ips.isEmpty) return [];
+
+  final cancelCheck = isCancelled ?? () => false;
+  final numIsolates = min(_maxIsolates, ips.length);
+  final concurrency = _isolateConcurrency;
+  final prefilterConc = _isolatePrefilterConcurrency;
 
   Uint8List? geoBytes;
   try {
@@ -352,59 +313,42 @@ Future<List<ScanResult>> runIsolateScanEngine(
     geoBytes = bd.buffer.asUint8List();
   } catch (_) {}
 
-  final cancelCheck = isCancelled ?? () => false;
-  final totalIps = ips.length;
-
-  // ── Phase 1: centralized TCP prefilter (main isolate, one global socket cap)
-  final prefilterProbe = FastProbeEngine(defaultTimeoutMs: _prefilterTimeoutMs);
-  final prefilterSem = Semaphore(_mainPrefilterConcurrency(totalIps));
-  final liveIps = await _batchedPrefilter(
-    ips: ips,
-    fastProbe: prefilterProbe,
-    sem: prefilterSem,
-    isCancelled: cancelCheck,
-    batchSize: _prefilterBatchSizeFor(totalIps),
-    onBatchProgress: onPrefilterProgress,
-  );
-
-  onPrefilterDone?.call(liveIps.length, totalIps);
-  if (liveIps.isEmpty || cancelCheck()) {
-    return [];
-  }
-
-  // ── Phase 2: TLS/full scan across isolates (live IPs only)
-  final numIsolates = _isolatesForIpCount(liveIps.length);
-  final concurrency = _scanConcurrencyFor(liveIps.length, numIsolates);
-
-  final chunkSize = (liveIps.length / numIsolates).ceil();
+  final chunkSize = (ips.length / numIsolates).ceil();
   final chunks = <List<String>>[];
-  for (int i = 0; i < liveIps.length; i += chunkSize) {
-    chunks.add(liveIps.sublist(i, min(i + chunkSize, liveIps.length)));
+  for (int i = 0; i < ips.length; i += chunkSize) {
+    chunks.add(ips.sublist(i, min(i + chunkSize, ips.length)));
   }
 
-  final totalLive = liveIps.length;
+  final totalIps = ips.length;
   int totalDone = 0;
+  int totalLive = 0;
+  final prefilterDoneWorkers = <int>{};
+  bool prefilterReported = false;
 
-  final topResults = _TopNResults(maxCapacity: min(20000, liveIps.length + 500));
+  final topResults = _TopNResults(maxCapacity: 99999);
   final completer = Completer<void>();
   int workersRemaining = chunks.length;
 
   final isolateRefs = <Isolate>[];
   final receivePorts = <ReceivePort>[];
   final workerCancelPorts = <SendPort>[];
-  bool _cancelSignalSent = false;
+  bool cancelSignalSent = false;
+
+  void tryReportPrefilter() {
+    if (prefilterReported || prefilterDoneWorkers.length < chunks.length) return;
+    prefilterReported = true;
+    onPrefilterDone?.call(totalLive, totalIps);
+  }
 
   final cancelPoll = Timer.periodic(const Duration(milliseconds: 300), (_) {
-    if (!cancelCheck() || _cancelSignalSent) return;
-    _cancelSignalSent = true;
-
+    if (!cancelCheck() || cancelSignalSent) return;
+    cancelSignalSent = true;
     for (final port in workerCancelPorts) {
       try {
         port.send('cancel');
       } catch (_) {}
     }
-
-    Future.delayed(const Duration(seconds: 5), () {
+    Future.delayed(const Duration(milliseconds: 2000), () {
       for (final iso in isolateRefs) {
         try {
           iso.kill(priority: Isolate.immediate);
@@ -434,25 +378,30 @@ Future<List<ScanResult>> runIsolateScanEngine(
       normalSniOverride: normalSniOverride,
       isCfScan: isCfScan,
       concurrency: concurrency,
+      prefilterConcurrency: prefilterConc,
+      tlsRepeats: tlsRepeats.clamp(1, 6),
       geoipBytes: geoBytes,
     );
 
     bool workerFinished = false;
-    void finishWorker(int workerIndex) {
+    void finishWorker({bool countPrefilter = false}) {
       if (workerFinished) return;
       workerFinished = true;
       try {
         receivePort.close();
       } catch (_) {}
-
       workersRemaining--;
+      if (countPrefilter && !prefilterDoneWorkers.contains(wi)) {
+        prefilterDoneWorkers.add(wi);
+        tryReportPrefilter();
+      }
       if (workersRemaining <= 0 && !completer.isCompleted) completer.complete();
     }
 
     receivePort.listen((msg) {
       if (msg is _WorkerReady) {
         workerCancelPorts.add(msg.cancelPort);
-        if (_cancelSignalSent) {
+        if (cancelSignalSent) {
           try {
             msg.cancelPort.send('cancel');
           } catch (_) {}
@@ -460,27 +409,42 @@ Future<List<ScanResult>> runIsolateScanEngine(
         return;
       }
 
-      if (msg is _WorkerBatch) {
+      if (msg is _WorkerPrefilterDone) {
+        totalLive += msg.liveCount;
+        prefilterDoneWorkers.add(msg.workerIndex);
+        tryReportPrefilter();
+      } else if (msg is _WorkerBatch) {
         topResults.addAll(msg.results);
-        if (msg.results.isNotEmpty) {
-          for (final r in msg.results) {
-            totalDone++;
-            onProgress?.call(totalDone, totalLive, r);
+        totalDone += msg.results.length;
+        if (onProgress != null && msg.results.isNotEmpty) {
+          onProgress(
+            totalDone,
+            totalLive > 0 ? totalLive : totalIps,
+            msg.results.last,
+          );
+        }
+      } else if (msg is _WorkerResult) {
+        // Fallback when batch messages were dropped (e.g. isolate killed mid-flight)
+        if (totalDone == 0 && msg.results.isNotEmpty) {
+          topResults.addAll(msg.results);
+          totalDone = msg.results.length;
+          if (onProgress != null) {
+            onProgress(
+              totalDone,
+              totalLive > 0 ? totalLive : totalIps,
+              msg.results.last,
+            );
           }
         }
       } else if (msg is _WorkerDone) {
-        finishWorker(msg.workerIndex);
-      } else if (msg is _WorkerResult) {
-        if (msg.results.isNotEmpty) {
-          topResults.addAll(msg.results);
-        }
+        finishWorker(countPrefilter: true);
       } else if (msg == null) {
-        finishWorker(wi);
+        finishWorker(countPrefilter: true);
       } else if (msg is List) {
-        finishWorker(wi);
+        finishWorker(countPrefilter: true);
       }
     }, onDone: () {
-      finishWorker(wi);
+      finishWorker(countPrefilter: true);
     });
 
     try {
@@ -493,11 +457,14 @@ Future<List<ScanResult>> runIsolateScanEngine(
       isolateRefs.add(iso);
     } catch (_) {
       receivePort.close();
-      finishWorker(wi);
+      workersRemaining--;
+      prefilterDoneWorkers.add(wi);
+      tryReportPrefilter();
+      if (workersRemaining <= 0 && !completer.isCompleted) completer.complete();
     }
   }
 
-  if (workersRemaining > 0 && !completer.isCompleted) await completer.future;
+  if (!completer.isCompleted) await completer.future;
 
   cancelPoll.cancel();
   topResults.finalize();

@@ -46,12 +46,7 @@ class FastProbeEngine {
       sw.stop();
       return FastProbeResult(ip: ip, tcpMs: sw.elapsedMicroseconds / 1000.0, alive: false, timedOut: false);
     } finally {
-      try {
-        await sock?.close();
-      } catch (_) {}
-      try {
-        sock?.destroy();
-      } catch (_) {}
+      try { sock?.destroy(); } catch (_) {}
     }
   }
 }

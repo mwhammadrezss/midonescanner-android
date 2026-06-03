@@ -4,7 +4,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../engine/range/cidr_provider_service.dart';
-import '../../core/l10n/strings.dart';
 
 const _bgColor     = Color(0xFF0A1A0F);
 const _cardColor   = Color(0xFF112216);
@@ -30,7 +29,7 @@ class RangeProviderSelector extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          S.t.cdnProvider,
+          'CDN PROVIDER',
           style: GoogleFonts.inter(
             color: _textSecond,
             fontWeight: FontWeight.w700,

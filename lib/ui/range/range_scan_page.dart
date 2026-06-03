@@ -15,7 +15,6 @@ import 'concurrency_slider.dart';
 import 'statistics_panel.dart';
 import 'live_results_panel.dart';
 import 'top_ips_panel.dart';
-import '../../core/l10n/strings.dart';
 
 // ── Theme constants ──────────────────────────────────────────────────────────
 const _bgColor     = Color(0xFF0A1A0F);
@@ -107,7 +106,7 @@ class _RangeScanPageState extends State<RangeScanPage> {
   // ── Scan control ─────────────────────────────────────────────────────────
   void _startScan() {
     if (_selectedCidr == null) {
-      _snack(S.t.selectCidrFirst);
+      _snack('Select a CIDR range first');
       return;
     }
 
@@ -144,12 +143,12 @@ class _RangeScanPageState extends State<RangeScanPage> {
         _paused = false;
         _stats = _engine.stats;
       });
-      _snack('${S.t.scanComplete} — ${_engine.results.length}');
+      _snack('✓ Scan complete — ${_engine.results.length} results');
     }).catchError((e) {
       _statsTimer?.cancel();
       if (!mounted) return;
       setState(() { _scanning = false; _paused = false; });
-      _snack('${S.t.scanErrorMsg}: $e');
+      _snack('Scan error: $e');
     });
   }
 
@@ -194,7 +193,7 @@ class _RangeScanPageState extends State<RangeScanPage> {
           children: [
             const Icon(Icons.radar_rounded, color: _accentLime, size: 20),
             const SizedBox(width: 8),
-            Text(S.t.rangeHistory.split(' ')[0] + ' Scan',
+            Text('Range Scan',
                 style: GoogleFonts.inter(
                     color: _accentLime,
                     fontWeight: FontWeight.w800,
@@ -235,10 +234,10 @@ class _RangeScanPageState extends State<RangeScanPage> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Row(
         children: [
-          _tabBtn(0, Icons.settings_rounded, S.t.configTab),
+          _tabBtn(0, Icons.settings_rounded, 'Config'),
           const SizedBox(width: 8),
           _tabBtn(1, Icons.bar_chart_rounded,
-              '${S.t.resultsTab}${_engine.results.isNotEmpty ? " (${_engine.results.length})" : ""}'),
+              'Results${_engine.results.isNotEmpty ? " (${_engine.results.length})" : ""}'),
         ],
       ),
     );
@@ -331,7 +330,7 @@ class _RangeScanPageState extends State<RangeScanPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(S.t.selectCidr,
+        Text('SELECT CIDR',
             style: GoogleFonts.inter(
                 color: _textSecond,
                 fontWeight: FontWeight.w700,
@@ -383,7 +382,7 @@ class _RangeScanPageState extends State<RangeScanPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(S.t.scanModeLabel,
+        Text('SCAN MODE',
             style: GoogleFonts.inter(
                 color: _textSecond,
                 fontWeight: FontWeight.w700,
@@ -392,11 +391,14 @@ class _RangeScanPageState extends State<RangeScanPage> {
         const SizedBox(height: 10),
         Row(
           children: [
-            _modeBtn(RangeScanMode.fastProbeOnly, S.t.fastMode, S.t.fastModeSub),
+            _modeBtn(RangeScanMode.fastProbeOnly, 'Fast',
+                'TCP only · Ultra fast'),
             const SizedBox(width: 8),
-            _modeBtn(RangeScanMode.normalScan, S.t.normalScanMode, S.t.normalScanSub),
+            _modeBtn(RangeScanMode.normalScan, 'Normal',
+                'TLS + Tunnel'),
             const SizedBox(width: 8),
-            _modeBtn(RangeScanMode.deepScan, S.t.deepScanMode, S.t.deepScanModeSub),
+            _modeBtn(RangeScanMode.deepScan, 'Deep',
+                'Full analysis'),
           ],
         ),
       ],
@@ -407,7 +409,7 @@ class _RangeScanPageState extends State<RangeScanPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(S.t.scanProfile,
+        Text('SCAN PROFILE',
             style: GoogleFonts.inter(
                 color: _textSecond,
                 fontWeight: FontWeight.w700,
@@ -520,7 +522,7 @@ class _RangeScanPageState extends State<RangeScanPage> {
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
             child: TopIpsPanel(
               topResults: topN,
-              onCopyAll: () => _snack('✓ ${topN.length} ${S.t.copyAll2}'),
+              onCopyAll: () => _snack('✓ ${topN.length} IPs copied!'),
             ),
           ),
         const SizedBox(height: 4),
@@ -570,7 +572,7 @@ class _RangeScanPageState extends State<RangeScanPage> {
                         : Icons.radar_rounded,
                         size: 20),
                     const SizedBox(width: 6),
-                    Text(_scanning ? S.t.stopLabel : S.t.startScanBtn,
+                    Text(_scanning ? 'STOP' : 'START SCAN',
                         style: GoogleFonts.inter(
                             fontWeight: FontWeight.w800, fontSize: 14)),
                   ],

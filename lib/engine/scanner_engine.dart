@@ -54,10 +54,13 @@ Future<ScanResult> scanOneIp(
   bool Function()? isCancelled,
   String? normalSniOverride,
   bool isCfScan        = false,
+  int tlsRepeats       = 0,
 }) async {
   final (country, flag) = GeoIPOffline().lookupFull(ip);
   final survivalTarget  = mode == ScanMode.deep ? _survivalDeep : _survivalNormal;
-  final repeats         = mode == ScanMode.deep ? 3 : 2;
+  final repeats         = tlsRepeats > 0
+      ? tlsRepeats.clamp(1, 6)
+      : (mode == ScanMode.deep ? 3 : 2);
 
   final subnetBestSni = SubnetMemoryCache().bestSniForSubnet(ip);
 

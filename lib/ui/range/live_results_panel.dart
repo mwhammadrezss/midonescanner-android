@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../engine/range/live_result_store.dart';
-import '../../core/l10n/strings.dart';
 
 const _accentLime  = Color(0xFFC6F135);
 const _textPrimary = Color(0xFFFFFFFF);
@@ -86,7 +85,7 @@ class _LiveResultsPanelState extends State<LiveResultsPanel> {
   void _copyIp(String ip) {
     Clipboard.setData(ClipboardData(text: ip));
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('${S.t.copiedIp}: $ip',
+      content: Text('Copied $ip',
           style: GoogleFonts.inter(
               color: _bgColor, fontWeight: FontWeight.w600)),
       backgroundColor: _accentLime,
@@ -106,7 +105,7 @@ class _LiveResultsPanelState extends State<LiveResultsPanel> {
             Icon(Icons.search_rounded, color: _textSecond, size: 40),
             const SizedBox(height: 10),
             Text(
-              S.t.noResultsRange,
+              'No results yet.\nStart scanning to discover IPs.',
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(color: _textSecond, fontSize: 13),
             ),

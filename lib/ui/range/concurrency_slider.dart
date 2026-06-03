@@ -3,7 +3,6 @@
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../core/l10n/strings.dart';
 
 const _accentLime  = Color(0xFFC6F135);
 const _textPrimary = Color(0xFFFFFFFF);
@@ -59,7 +58,7 @@ class _ConcurrencySliderState extends State<ConcurrencySlider> {
         Row(
           children: [
             Text(
-              S.t.concurrency,
+              'CONCURRENCY',
               style: GoogleFonts.inter(
                 color: _textSecond,
                 fontWeight: FontWeight.w700,
