@@ -665,7 +665,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         setState(() {
           _scanning = true;
           _cancelled = false;
-          _statusText = _tr('Scanning \${_importedIps.length} imported IPs...', 'اسکن \${_importedIps.length} IP ایمپورت‌شده...');
+          _statusText = _tr('Scanning ${_importedIps.length} imported IPs...', 'اسکن ${_importedIps.length} IP ایمپورت‌شده...');
         });
         _runScan(
           List<String>.from(_importedIps),
@@ -693,7 +693,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         _scanning = true;
         _cancelled = false;
-        _statusText = _tr('Sampling IPs from \${activeCidrs.length} range(s)...', 'نمونه‌برداری از \${activeCidrs.length} رنج...');
+        _statusText = _tr('Sampling IPs from ${activeCidrs.length} range(s)...', 'نمونه‌برداری از ${activeCidrs.length} رنج...');
       });
 
       try {
@@ -715,8 +715,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
         _runFastRangeScan(sampledIps);
       } catch (e) {
-        if (mounted) setState(() { _scanning = false; _statusText = _tr('Error: \$e', 'خطا: \$e'); });
-        _showSnack(_tr('Error: \$e', 'خطا: \$e'));
+        if (mounted) setState(() { _scanning = false; _statusText = _tr('Error: $e', 'خطا: $e'); });
+        _showSnack(_tr('Error: $e', 'خطا: $e'));
       }
       return;
     }
@@ -726,7 +726,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final ips = _expandCidrOrIps(_ipController.text);
     if (ips.isEmpty) { _showSnack(_tr('No valid IPs found! Check your input.', 'IP معتبری پیدا نشد! ورودی رو چک کن.')); return; }
     // Safety limit to prevent memory issues with huge CIDRs
-    if (ips.length > 50000) { _showSnack(_tr('Too many IPs (\${ips.length}). Max 50,000.', 'تعداد IP خیلی زیاده (\${ips.length}). حداکثر ۵۰٬۰۰۰.')); return; }
+    if (ips.length > 50000) { _showSnack(_tr('Too many IPs (${ips.length}). Max 50,000.', 'تعداد IP خیلی زیاده (${ips.length}). حداکثر ۵۰٬۰۰۰.')); return; }
     if (_cdnSubMode == CdnSubMode.deep) {
       _showSniPickerDialog(ips);
       return;
@@ -862,7 +862,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _done = done;
         final pct = (_done / _total * 100).round();
         setState(() {
-          _statusText = _tr('Fast scan \$pct% — batch \${batchStart ~/ batchSize + 1}/\${(ips.length / batchSize).ceil()}', 'اسکن سریع \$pct% — دسته \${batchStart ~/ batchSize + 1}/\${(ips.length / batchSize).ceil()}');
+          _statusText = _tr('Fast scan $pct% — batch ${batchStart ~/ batchSize + 1}/${(ips.length / batchSize).ceil()}', 'اسکن سریع $pct% — دسته ${batchStart ~/ batchSize + 1}/${(ips.length / batchSize).ceil()}');
         });
 
         if (!_cancelled && batchStart + batchSize < ips.length) {
@@ -871,7 +871,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     } catch (e) {
       if (mounted) {
-        setState(() { _statusText = _tr('Scan error: \$e', 'خطای اسکن: \$e'); });
+        setState(() { _statusText = _tr('Scan error: $e', 'خطای اسکن: $e'); });
         _showSnack(_tr('Scan error: $e', 'خطای اسکن: $e'));
       }
     } finally {
@@ -886,9 +886,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     if (mounted && !_cancelled) {
       setState(() {
-        _statusText = _tr('Done! \${_results.where((r) => r.isAlive).length} alive from \${ips.length}', 'تمام! \${_results.where((r) => r.isAlive).length} زنده از \${ips.length}');
+        _statusText = _tr('Done! ${_results.where((r) => r.isAlive).length} alive from ${ips.length}', 'تمام! ${_results.where((r) => r.isAlive).length} زنده از ${ips.length}');
       });
-      _showSnack(_tr('✓ Done! \${_results.where((r) => r.isAlive).length} alive IPs found', '✓ تمام! \${_results.where((r) => r.isAlive).length} IP زنده پیدا شد'));
+      _showSnack(_tr('✓ Done! ${_results.where((r) => r.isAlive).length} alive IPs found', '✓ تمام! ${_results.where((r) => r.isAlive).length} IP زنده پیدا شد'));
       if (_results.isNotEmpty) {
         Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) setState(() => _tab = 1);
@@ -1379,7 +1379,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         'results': data,
       }));
       _showSnack(_tr('✓ JSON saved: scan_\$ts.json', '✓ JSON ذخیره شد: scan_\$ts.json'));
-    } catch (e) { _showSnack(_tr('Export error: \$e', 'خطای خروجی: \$e')); }
+    } catch (e) { _showSnack(_tr('Export error: $e', 'خطای خروجی: $e')); }
   }
 
   Future<void> _saveResults() async {
@@ -1407,7 +1407,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       await file.writeAsString(buf.toString());
       _showSnack(_tr('✓ Saved: scan_\$ts.txt', '✓ ذخیره شد: scan_\$ts.txt'));
-    } catch (e) { _showSnack(_tr('Save error: \$e', 'خطای ذخیره: \$e')); }
+    } catch (e) { _showSnack(_tr('Save error: $e', 'خطای ذخیره: $e')); }
   }
 
   // p41: retest all failed IPs
@@ -1415,7 +1415,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _retestFailed() async {
     final failed = _results.where((r) => !r.isAlive).toList();
     if (failed.isEmpty) { _showSnack(_tr('No failed IPs to retest!', 'هیچ IP ناموفقی برای اسکن مجدد نیست!')); return; }
-    _showSnack(_tr('Retesting \${failed.length} failed IPs...', 'اسکن مجدد \${failed.length} IP ناموفق...'));
+    _showSnack(_tr('Retesting ${failed.length} failed IPs...', 'اسکن مجدد ${failed.length} IP ناموفق...'));
 
     const batchSize = 8;
     for (int i = 0; i < failed.length; i += batchSize) {
@@ -1819,7 +1819,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
               child: Row(
                 children: [
-                  Text(_tr('\${_cfImportedIps.length} IPs imported', '\${_cfImportedIps.length} IP ایمپورت شد'),
+                  Text(_tr('${_cfImportedIps.length} IPs imported', '${_cfImportedIps.length} IP ایمپورت شد'),
                       style: GoogleFonts.inter(color: const Color(0xFF00E5FF), fontSize: 12, fontWeight: FontWeight.w700)),
                   const Spacer(),
                   GestureDetector(
@@ -2197,7 +2197,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   _cfPhase2Total > 0
                       ? _tr(_tr('Phase 2: Config validation...', 'مرحله ۲: اعتبارسنجی کانفیگ...'), 'مرحله ۲: اعتبارسنجی کانفیگ...')
                       : _cfPhase1Done
-                          ? _tr('Phase 1 done — \${_cfPhase1Results.where((r) => r.isEdge).length} CF edges', 'مرحله ۱ تمام — \${_cfPhase1Results.where((r) => r.isEdge).length} لبه CF')
+                          ? _tr('Phase 1 done — ${_cfPhase1Results.where((r) => r.isEdge).length} CF edges', 'مرحله ۱ تمام — ${_cfPhase1Results.where((r) => r.isEdge).length} لبه CF')
                           : _tr(_tr('Phase 1: CF edge detection...', 'مرحله ۱: تشخیص لبه CF...'), 'مرحله ۱: تشخیص لبه CF...'),
                   style: GoogleFonts.inter(
                       color: _cfPhase2Total > 0
@@ -2240,7 +2240,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   final ips = _cfPhase2Results.where((r) => r.success).map((r) => r.ip).join('\n');
                   if (ips.isEmpty) { _showSnack(_tr('No working IPs!', 'هیچ IP کارآمدی نیست!')); return; }
                   Clipboard.setData(ClipboardData(text: ips));
-                  _showSnack(_tr('Copied \${_cfPhase2Results.where((r) => r.success).length} IPs', '\${_cfPhase2Results.where((r) => r.success).length} IP کپی شد'));
+                  _showSnack(_tr('Copied ${_cfPhase2Results.where((r) => r.success).length} IPs', '${_cfPhase2Results.where((r) => r.success).length} IP کپی شد'));
                 }, isAccent: true),
               ],
             ),
@@ -2262,7 +2262,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   final ips = _cfPhase1Results.where((r) => r.isEdge).map((r) => r.ip).join('\n');
                   if (ips.isEmpty) { _showSnack(_tr('No CF edge IPs!', 'هیچ IP لبه CF نیست!')); return; }
                   Clipboard.setData(ClipboardData(text: ips));
-                  _showSnack(_tr('Copied \${_cfPhase1Results.where((r) => r.isEdge).length} IPs', '\${_cfPhase1Results.where((r) => r.isEdge).length} IP کپی شد'));
+                  _showSnack(_tr('Copied ${_cfPhase1Results.where((r) => r.isEdge).length} IPs', '${_cfPhase1Results.where((r) => r.isEdge).length} IP کپی شد'));
                 }, isAccent: true),
               ],
             ),
@@ -2284,7 +2284,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   final edgeIps = _cfResults.where((r) => r.isEdge).map((r) => r.ip).join('\n');
                   if (edgeIps.isEmpty) { _showSnack(_tr('No CF edge IPs!', 'هیچ IP لبه CF نیست!')); return; }
                   Clipboard.setData(ClipboardData(text: edgeIps));
-                  _showSnack(_tr('Copied \${_cfResults.where((r) => r.isEdge).length} IPs', '\${_cfResults.where((r) => r.isEdge).length} IP کپی شد'));
+                  _showSnack(_tr('Copied ${_cfResults.where((r) => r.isEdge).length} IPs', '${_cfResults.where((r) => r.isEdge).length} IP کپی شد'));
                 }, isAccent: true),
               ],
             ),
@@ -2398,9 +2398,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _cfImportedIps = ips;
         _cfIpMode = 3;
       });
-      _showSnack(_tr('Imported \${ips.length} IPs', '\${ips.length} IP ایمپورت شد'));
+      _showSnack(_tr('Imported ${ips.length} IPs', '${ips.length} IP ایمپورت شد'));
     } catch (e) {
-      _showSnack(_tr('Import error: \$e', 'خطای ایمپورت: \$e'));
+      _showSnack(_tr('Import error: $e', 'خطای ایمپورت: $e'));
     }
   }
 
@@ -3403,7 +3403,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _dnsVpnActiveDns2  = dns2;
           _dnsVpnStarting    = false;
         });
-        _showSnack(_tr('✓ DNS VPN active — routing through \$dns1', '✓ DNS VPN فعال شد — مسیریابی از طریق \$dns1'));
+        _showSnack(_tr('✓ DNS VPN active — routing through $dns1', '✓ DNS VPN فعال شد — مسیریابی از طریق $dns1'));
       }
     } on PlatformException catch (e) {
       if (mounted) {
@@ -3411,13 +3411,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (e.code == 'VPN_DENIED') {
           _showSnack(_tr('VPN permission denied. Please allow it and try again.', 'دسترسی VPN رد شد. لطفاً مجوز بده و دوباره امتحان کن.'));
         } else {
-          _showSnack(_tr('Failed to start DNS VPN: \${e.message}', 'خطا در شروع DNS VPN: \${e.message}'));
+          _showSnack(_tr('Failed to start DNS VPN: ${e.message}', 'خطا در شروع DNS VPN: ${e.message}'));
         }
       }
     } catch (e) {
       if (mounted) {
         setState(() { _dnsVpnStarting = false; });
-        _showSnack(_tr('Error: \$e', 'خطا: \$e'));
+        _showSnack(_tr('Error: $e', 'خطا: $e'));
       }
     }
   }
@@ -3435,7 +3435,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _showSnack(_tr('DNS VPN stopped.', 'DNS VPN متوقف شد.'));
       }
     } catch (e) {
-      _showSnack(_tr('Error stopping VPN: \$e', 'خطا در توقف VPN: \$e'));
+      _showSnack(_tr('Error stopping VPN: $e', 'خطا در توقف VPN: $e'));
     }
   }
 
@@ -3719,7 +3719,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               _miniBtn(
                 _dnsUpdating
                     ? _tr('Updating…', 'در حال بروزرسانی...')
-                    : _tr('Update Online (\${_activeDnsServers.length})', 'بروزرسانی آنلاین (\${_activeDnsServers.length})'),
+                    : _tr('Update Online (${_activeDnsServers.length})', 'بروزرسانی آنلاین (${_activeDnsServers.length})'),
                 _dnsUpdating ? () {} : _updateDnsOnline,
               ),
             ],
@@ -3920,7 +3920,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       return '#$rank  ${s.ip}  (${latency}ms)';
     }).join('\n');
     Clipboard.setData(ClipboardData(text: text));
-    _showSnack(_tr('✓ Top \${top5.length} DNS copied!', '✓ \${top5.length} DNS برتر کپی شد!'));
+    _showSnack(_tr('✓ Top ${top5.length} DNS copied!', '✓ ${top5.length} DNS برتر کپی شد!'));
   }
 
   Future<void> _updateDnsOnline() async {
@@ -4140,7 +4140,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   const Icon(Icons.playlist_add_check_rounded, color: accentLime, size: 14),
                   const SizedBox(width: 6),
-                  Text('\${_selectedRangeCidrs.length} ' + _tr('ranges selected', 'رنج انتخاب شده'),
+                  Text('${_selectedRangeCidrs.length} ' + _tr('ranges selected', 'رنج انتخاب شده'),
                       style: GoogleFonts.inter(color: accentLime, fontSize: 11, fontWeight: FontWeight.w600)),
                 ],
               ),
@@ -5440,7 +5440,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _retestCard(ScanResult original) async {
-    _showSnack(_tr('Retesting \${original.ip}...', 'اسکن مجدد \${original.ip}...'));
+    _showSnack(_tr('Retesting ${original.ip}...', 'اسکن مجدد ${original.ip}...'));
     final result = await scanOneIp(original.ip);
     if (!mounted) return;
     setState(() {
@@ -5449,7 +5449,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _displayDirty = true;
     });
     if (result.isAlive) {
-      _showSnack(_tr('✓ \${original.ip} — \${result.latencyMs.toStringAsFixed(0)} ms', '✓ \${original.ip} — \${result.latencyMs.toStringAsFixed(0)} ms'));
+      _showSnack(_tr('✓ ${original.ip} — ${result.latencyMs.toStringAsFixed(0)} ms', '✓ ${original.ip} — ${result.latencyMs.toStringAsFixed(0)} ms'));
     } else {
       _showSnack('❌ ${original.ip} — Failed');
     }
