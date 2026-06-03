@@ -796,7 +796,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _prefilterLive  = liveCount;
           _prefilterTotal = totalCount;
           _prefiltering   = false;
-          _total          = liveCount;
+          _total          = liveCount > 0 ? liveCount : _total;
           // FIX(prefilter-reset): do NOT reset _done here.
           // onPrefilterDone now fires once after ALL workers; by that point
           // many _WorkerBatch callbacks may have already incremented _done.
@@ -813,7 +813,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _done = done;
           // FIX(total-shrink): only set _total from onProgress if not yet initialised.
           // prefilter count is the stable source of truth; never shrink it.
-          if (_total == 0) _total = total;
+          if (total > _total) _total = total;
           if (done > 0 && _total > 0) {
             final pct = (done / _total * 100).round();
             _statusText = 'Scanning $pct%...';
