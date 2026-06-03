@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -126,18 +126,30 @@ class MidOneScannerApp extends StatelessWidget {
   const MidOneScannerApp({super.key});
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'MidONe Scanner SK',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: bgColor,
-        colorScheme: const ColorScheme.dark(
-          primary: accentLime, secondary: accentLime2, surface: cardColor,
-        ),
-        textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
-      ),
-      home: const HomeScreen(),
+    return ValueListenableBuilder<AppLanguage>(
+      valueListenable: AppSettings.languageNotifier,
+      builder: (context, language, _) {
+        final isFa = language == AppLanguage.fa;
+        return MaterialApp(
+          title: 'MidONe Scanner',
+          debugShowCheckedModeBanner: false,
+          locale: isFa ? const Locale('fa', 'IR') : const Locale('en', 'US'),
+          supportedLocales: const [Locale('fa', 'IR'), Locale('en', 'US')],
+          builder: (context, child) => Directionality(
+            textDirection: isFa ? TextDirection.rtl : TextDirection.ltr,
+            child: child!,
+          ),
+          theme: ThemeData(
+            brightness: Brightness.dark,
+            scaffoldBackgroundColor: bgColor,
+            colorScheme: const ColorScheme.dark(
+              primary: accentLime, secondary: accentLime2, surface: cardColor,
+            ),
+            textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
+          ),
+          home: const HomeScreen(),
+        );
+      },
     );
   }
 }
@@ -165,7 +177,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   final _ipController = TextEditingController();
   List<ScanResult> _results = [];
-  String _statusText = 'Ready to scan...';
+  String _statusText = S.t.readyToScan;
   String _sortBy = 'speed';  // default: sort by score
   // BUG 9 FIX: removed _filterThrottled â€” dead code, no UI toggle existed.
   // The 'alive' advanced filter covers this use case.
@@ -357,7 +369,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             children: [
               Image.asset('assets/icons/app_icon.png', width: 72, height: 72),
               const SizedBox(height: 16),
-              Text('MidONe Scanner',
+              Text(S.t.appTitle,
                   style: GoogleFonts.inter(
                       color: accentLime, fontWeight: FontWeight.w800, fontSize: 20)),
               const SizedBox(height: 8),
@@ -1031,7 +1043,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // p44: pause scan
   void _pauseScan() {
-    setState(() { _paused = true; _statusText = 'Paused...'; });
+    setState(() { _paused = true; _statusText = S.t.paused; });
   }
 
   // p44: resume scan
@@ -1042,7 +1054,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!_paused) return;
     setState(() {
       _paused = false;
-      _statusText = 'Resumed...';
+      _statusText = S.t.resumed;
     });
   }
 
@@ -1349,18 +1361,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('SCAN MODE',
+          Text(S.t.scanMode.toUpperCase(),
               style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(child: _tabBtn(ScanTab.cdn, 'CDN', 'TLS · BW')),
+              Expanded(child: _tabBtn(ScanTab.cdn, S.t.cdn, S.t.cdnModeSub)),
               const SizedBox(width: 6),
-              Expanded(child: _tabBtn(ScanTab.cloudflare, 'CF', 'Cloudflare')),
+              Expanded(child: _tabBtn(ScanTab.cloudflare, 'CF', S.t.cf)),
               const SizedBox(width: 6),
-              Expanded(child: _tabBtn(ScanTab.range, 'Range', 'CIDR')),
+              Expanded(child: _tabBtn(ScanTab.range, S.t.range, S.t.rangeModeSub)),
               const SizedBox(width: 6),
-              Expanded(child: _tabBtn(ScanTab.dns, 'DNS', 'Best DNS')),
+              Expanded(child: _tabBtn(ScanTab.dns, S.t.dns, S.t.dnsModeSub)),
             ],
           ),
         ],
@@ -1414,7 +1426,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('CDN MODE',
+          Text(S.t.cdnMode,
               style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
           const SizedBox(height: 10),
           Row(
@@ -1464,10 +1476,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         children: [
           Row(
             children: [
-              Text('IP ADDRESSES',
+              Text(S.t.ipAddresses,
                   style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
               const Spacer(),
-              _miniBtn('Paste', () async {
+              _miniBtn(S.t.paste, () async {
                 final data = await Clipboard.getData('text/plain');
                 if (data?.text != null) {
                   final cur = _ipController.text;
@@ -1475,7 +1487,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 }
               }),
               const SizedBox(width: 8),
-              _miniBtn('Clear', () => _ipController.clear(), isDestructive: true),
+              _miniBtn(S.t.clear, () => _ipController.clear(), isDestructive: true),
             ],
           ),
           const SizedBox(height: 10),
@@ -2560,14 +2572,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           // Results
           if (_dnsResults != null) ...[
             const SizedBox(height: 14),
-            Text('Top DNS Servers',
+            Text(S.t.topDnsServers,
                 style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.bold, color: textPrimary)),
             const SizedBox(height: 8),
             if (_dnsResults!.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 child: Center(
-                  child: Text('No results found.',
+                  child: Text(S.t.noResultsFound,
                       style: GoogleFonts.inter(color: textSecond, fontSize: 13)),
                 ),
               )
@@ -2765,7 +2777,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           // â”€â”€ Header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
           Row(
             children: [
-              Text('AKAMAI RANGE SCAN',
+              Text(S.t.akamaiRange,
                   style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
               const Spacer(),
               GestureDetector(
@@ -2782,7 +2794,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   child: Row(children: [
                     const Icon(Icons.history_rounded, color: accentLime, size: 14),
                     const SizedBox(width: 4),
-                    Text('History', style: GoogleFonts.inter(color: accentLime, fontSize: 11, fontWeight: FontWeight.w600)),
+                    Text(S.t.history, style: GoogleFonts.inter(color: accentLime, fontSize: 11, fontWeight: FontWeight.w600)),
                   ]),
                 ),
               ),
@@ -2790,7 +2802,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           const SizedBox(height: 10),
 
-          Text('Fast TCP :443 — unlimited Akamai sampling',
+          Text(S.t.akamaiSubtitle,
               style: GoogleFonts.inter(color: textSecond, fontSize: 11)),
           const SizedBox(height: 12),
 
@@ -2975,7 +2987,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   child: Row(children: [
                     const Icon(Icons.upload_file_rounded, color: accentLime, size: 13),
                     const SizedBox(width: 3),
-                    Text('Import', style: GoogleFonts.inter(color: accentLime, fontSize: 10, fontWeight: FontWeight.w600)),
+                    Text(S.t.importLabel, style: GoogleFonts.inter(color: accentLime, fontSize: 10, fontWeight: FontWeight.w600)),
                   ]),
                 ),
               ),
@@ -3428,7 +3440,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   Icon(_scanning ? Icons.stop_rounded : Icons.radar_rounded, size: 20),
                   const SizedBox(width: 8),
-                  Text(_scanning ? 'STOP SCAN' : 'START SCAN',
+                  Text(_scanning ? S.t.stopScan.toUpperCase() : S.t.startScan.toUpperCase(),
                       style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 15, letterSpacing: 0.5)),
                 ],
               ),
@@ -3523,7 +3535,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('LIVE METRICS',
+          Text(S.t.liveMetrics,
               style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
           const SizedBox(height: 10),
           Row(
@@ -3605,7 +3617,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           children: [
             const Icon(Icons.bar_chart_rounded, size: 18),
             const SizedBox(width: 8),
-            Text('View ${_results.length} Results',
+            Text('${S.t.viewResults} (${_results.length})',
                 style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 14)),
           ],
         ),
@@ -3630,23 +3642,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   children: [
                     Text('${list.length}', style: GoogleFonts.inter(color: textSecond, fontSize: 11)),
                     const SizedBox(width: 6),
-                    _miniBtn('Latency', () => setState(() { _sortBy = 'latency'; _displayDirty = true; }), isActive: _sortBy == 'latency'),
+                    _miniBtn(S.t.sortLatency, () => setState(() { _sortBy = 'latency'; _displayDirty = true; }), isActive: _sortBy == 'latency'),
                     const SizedBox(width: 5),
-                    _miniBtn('Score', () => setState(() { _sortBy = 'speed'; _displayDirty = true; }), isActive: _sortBy == 'speed'),
+                    _miniBtn(S.t.sortScore, () => setState(() { _sortBy = 'speed'; _displayDirty = true; }), isActive: _sortBy == 'speed'),
                     const SizedBox(width: 5),
-                    _miniBtn('Rel', () => setState(() { _sortBy = 'reliability'; _displayDirty = true; }), isActive: _sortBy == 'reliability'),
+                    _miniBtn(S.t.sortReliability, () => setState(() { _sortBy = 'reliability'; _displayDirty = true; }), isActive: _sortBy == 'reliability'),
                     const SizedBox(width: 5),
                     // cf1: sort by datacenter
                     _miniBtn('Colo', () => setState(() { _sortBy = _sortBy == 'colo' ? 'latency' : 'colo'; _displayDirty = true; }), isActive: _sortBy == 'colo'),
                     const SizedBox(width: 5),
                     // p39: advanced filters
-                    _miniBtn('All', () => setState(() { _advancedFilter = 'all'; _displayDirty = true; }), isActive: _advancedFilter == 'all'),
+                    _miniBtn(S.t.filterAll, () => setState(() { _advancedFilter = 'all'; _displayDirty = true; }), isActive: _advancedFilter == 'all'),
                     const SizedBox(width: 5),
                     _miniBtn('â˜…â˜…â˜…', () => setState(() { _advancedFilter = 'excellent'; _displayDirty = true; }), isActive: _advancedFilter == 'excellent'),
                     const SizedBox(width: 5),
                     _miniBtn('<150ms', () => setState(() { _advancedFilter = 'low_rtt'; _displayDirty = true; }), isActive: _advancedFilter == 'low_rtt'),
                     const SizedBox(width: 5),
-                    _miniBtn('Alive', () => setState(() { _advancedFilter = 'alive'; _displayDirty = true; }), isActive: _advancedFilter == 'alive'),
+                    _miniBtn(S.t.filterAlive, () => setState(() { _advancedFilter = 'alive'; _displayDirty = true; }), isActive: _advancedFilter == 'alive'),
                     const SizedBox(width: 5),
                     // cf1/ws2: WS filter buttons
                     _miniBtn('WS âœ“', () => setState(() { _advancedFilter = _advancedFilter == 'ws_ok' ? 'all' : 'ws_ok'; _displayDirty = true; }), isActive: _advancedFilter == 'ws_ok'),
@@ -3654,7 +3666,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     _miniBtn('WS âœ—', () => setState(() { _advancedFilter = _advancedFilter == 'ws_fail' ? 'all' : 'ws_fail'; _displayDirty = true; }), isActive: _advancedFilter == 'ws_fail'),
                     const SizedBox(width: 5),
                     // p45: compact mode
-                    _miniBtn(_compactMode ? 'Full' : 'Compact', () => setState(() => _compactMode = !_compactMode)),
+                    _miniBtn(_compactMode ? S.t.filterFull : S.t.filterCompact, () => setState(() => _compactMode = !_compactMode)),
                   ],
                 ),
               ),
@@ -3697,9 +3709,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   children: [
                     _buildCopyButton(),
                     const SizedBox(width: 5),
-                    _miniBtn('Save TXT', _saveResults),
+                    _miniBtn(S.t.saveTxt, _saveResults),
                     const SizedBox(width: 5),
-                    _miniBtn('Export JSON', _exportJson),   // p40
+                    _miniBtn(S.t.exportJson, _exportJson),   // p40
                     const SizedBox(width: 5),
                     _miniBtn('Retest âŒ', _retestFailed),   // p41
                   ],
@@ -3750,7 +3762,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           child: Row(children: [
             const Icon(Icons.filter_5_rounded, color: accentLime, size: 18),
             const SizedBox(width: 8),
-            Text('Copy Top 5', style: GoogleFonts.inter(color: textPrimary, fontWeight: FontWeight.w600, fontSize: 13)),
+            Text(S.t.copyTop5, style: GoogleFonts.inter(color: textPrimary, fontWeight: FontWeight.w600, fontSize: 13)),
           ]),
         ),
         PopupMenuItem(
@@ -3758,7 +3770,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           child: Row(children: [
             const Icon(Icons.copy_all_rounded, color: accentLime, size: 18),
             const SizedBox(width: 8),
-            Text('Copy All', style: GoogleFonts.inter(color: textPrimary, fontWeight: FontWeight.w600, fontSize: 13)),
+            Text(S.t.copyAll, style: GoogleFonts.inter(color: textPrimary, fontWeight: FontWeight.w600, fontSize: 13)),
           ]),
         ),
       ],
@@ -4090,8 +4102,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       padding: const EdgeInsets.only(top: 4, bottom: 4),
       child: Row(
         children: [
-          Expanded(child: _navItem(0, Icons.radar_rounded, 'Scanner')),
-          Expanded(child: _navItem(1, Icons.bar_chart_rounded, 'Results')),
+          Expanded(child: _navItem(0, Icons.radar_rounded, S.t.scanner)),
+          Expanded(child: _navItem(1, Icons.bar_chart_rounded, S.t.results)),
         ],
       ),
     );

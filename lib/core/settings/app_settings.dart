@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum AppLanguage { fa, en }
@@ -14,16 +15,23 @@ class AppSettings {
   String cdnNormalSni = 'speed.cloudflare.com';
   List<String> cdnCustomSnis = [];
 
+  // ── Global language notifier — triggers full-app rebuild ──
+  static final ValueNotifier<AppLanguage> languageNotifier =
+      ValueNotifier<AppLanguage>(AppLanguage.fa);
+
   Future<void> load() async {
     final p = await SharedPreferences.getInstance();
     final lang = p.getString(_keyLang);
     if (lang == 'en') language = AppLanguage.en;
     cdnNormalSni = p.getString(_keyNormalSni) ?? 'speed.cloudflare.com';
     cdnCustomSnis = p.getStringList(_keyCustomSnis) ?? [];
+    // Sync notifier after load
+    languageNotifier.value = language;
   }
 
   Future<void> setLanguage(AppLanguage lang) async {
     language = lang;
+    languageNotifier.value = lang; // fires ValueListenableBuilder in MaterialApp
     final p = await SharedPreferences.getInstance();
     await p.setString(_keyLang, lang == AppLanguage.en ? 'en' : 'fa');
   }

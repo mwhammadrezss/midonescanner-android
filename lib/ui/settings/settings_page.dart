@@ -29,10 +29,17 @@ class _SettingsPageState extends State<SettingsPage> {
     final s = AppSettings.instance;
     _normalSniCtrl.text = s.cdnNormalSni;
     _customSnisCtrl.text = s.cdnCustomSnis.join('\n');
+    // Listen to language changes to rebuild this page too
+    AppSettings.languageNotifier.addListener(_onLangChange);
+  }
+
+  void _onLangChange() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    AppSettings.languageNotifier.removeListener(_onLangChange);
     _normalSniCtrl.dispose();
     _customSnisCtrl.dispose();
     super.dispose();
@@ -51,19 +58,32 @@ class _SettingsPageState extends State<SettingsPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // ── Language ──────────────────────────────────────────
           _section(l.language),
           SegmentedButton<AppLanguage>(
             segments: [
-              ButtonSegment(value: AppLanguage.fa, label: Text(l.fa ? 'فارسی' : 'FA')),
-              ButtonSegment(value: AppLanguage.en, label: const Text('English')),
+              ButtonSegment(
+                value: AppLanguage.fa,
+                label: Text('فارسی',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+              ),
+              ButtonSegment(
+                value: AppLanguage.en,
+                label: Text('English',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+              ),
             ],
             selected: {st.language},
             onSelectionChanged: (s) async {
+              // setLanguage fires languageNotifier → entire app rebuilds
               await st.setLanguage(s.first);
-              setState(() {});
+              // setState for this page (notifier listener also does it)
+              if (mounted) setState(() {});
             },
           ),
           const SizedBox(height: 20),
+
+          // ── CDN Normal SNI ────────────────────────────────────
           _section('CDN Normal SNI'),
           TextField(
             controller: _normalSniCtrl,
@@ -72,15 +92,27 @@ class _SettingsPageState extends State<SettingsPage> {
             onSubmitted: (_) => _saveCdn(),
           ),
           const SizedBox(height: 8),
-          Text('Deep scan uses built-in presets + your list below.',
-              style: GoogleFonts.inter(color: _textSecond, fontSize: 11)),
+          Text(
+            l.isFa(context)
+                ? 'اسکن عمیق از پیش‌تنظیم‌های داخلی + لیست شما در پایین استفاده می‌کنه.'
+                : 'Deep scan uses built-in presets + your list below.',
+            style: GoogleFonts.inter(color: _textSecond, fontSize: 11),
+          ),
           const SizedBox(height: 12),
-          _section('CDN Deep — custom SNIs (one per line)'),
+
+          // ── CDN Deep SNIs ─────────────────────────────────────
+          _section(
+            l.isFa(context)
+                ? 'CDN عمیق — SNI سفارشی (هر خط یکی)'
+                : 'CDN Deep — custom SNIs (one per line)',
+          ),
           TextField(
             controller: _customSnisCtrl,
             maxLines: 5,
             style: GoogleFonts.robotoMono(color: Colors.white, fontSize: 11),
-            decoration: _inputDeco('Optional — merged with: ${kDeepSniPresets.take(3).join(", ")}...'),
+            decoration: _inputDeco(
+              'Optional — merged with: ${kDeepSniPresets.take(3).join(", ")}...',
+            ),
           ),
           const SizedBox(height: 16),
           ElevatedButton(
@@ -89,9 +121,11 @@ class _SettingsPageState extends State<SettingsPage> {
               backgroundColor: _accent,
               foregroundColor: Colors.black,
             ),
-            child: Text(l.fa ? 'ذخیره' : 'Save'),
+            child: Text(l.save),
           ),
           const SizedBox(height: 24),
+
+          // ── Telegram ──────────────────────────────────────────
           _section(l.joinTelegram),
           ListTile(
             tileColor: _card,
@@ -102,11 +136,13 @@ class _SettingsPageState extends State<SettingsPage> {
             leading: const Icon(Icons.telegram, color: Color(0xFF29B6F6)),
             title: Text('@mmdrlx', style: GoogleFonts.inter(color: _accent)),
             subtitle: Text(
-              l.fa ? 'بروزرسانی و IPهای تمیز' : 'Updates & clean IPs',
+              l.telegramSub,
               style: GoogleFonts.inter(color: _textSecond, fontSize: 11),
             ),
-            onTap: () => launchUrl(Uri.parse('https://t.me/mmdrlx'),
-                mode: LaunchMode.externalApplication),
+            onTap: () => launchUrl(
+              Uri.parse('https://t.me/mmdrlx'),
+              mode: LaunchMode.externalApplication,
+            ),
           ),
         ],
       ),
@@ -124,16 +160,22 @@ class _SettingsPageState extends State<SettingsPage> {
     await st.setCdnCustomSnis(lines);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(S.t.fa ? 'ذخیره شد' : 'Saved')),
+        SnackBar(content: Text(S.t.saved)),
       );
     }
   }
 
   Widget _section(String t) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
-        child: Text(t,
-            style: GoogleFonts.inter(
-                color: _textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1)),
+        child: Text(
+          t,
+          style: GoogleFonts.inter(
+            color: _textSecond,
+            fontWeight: FontWeight.w700,
+            fontSize: 11,
+            letterSpacing: 1,
+          ),
+        ),
       );
 
   InputDecoration _inputDeco(String hint) => InputDecoration(
@@ -146,4 +188,9 @@ class _SettingsPageState extends State<SettingsPage> {
           borderSide: const BorderSide(color: _border),
         ),
       );
+}
+
+// Helper extension to avoid passing S.t.fa everywhere
+extension _SHelper on S {
+  bool isFa(BuildContext context) => fa;
 }
