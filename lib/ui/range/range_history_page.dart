@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../storage/range_scan_storage.dart';
+import '../../core/l10n/strings.dart';
 
 // Theme constants (copied from main.dart — private there)
 const _bgColor     = Color(0xFF0A1A0F);
@@ -57,18 +58,18 @@ class _RangeHistoryPageState extends State<RangeHistoryPage> {
           side: const BorderSide(color: _borderColor),
         ),
         title: Text(
-          'Reset History?',
+          S.t.resetHistoryQ,
           style: GoogleFonts.inter(
               color: _accentLime, fontWeight: FontWeight.w700, fontSize: 16),
         ),
         content: Text(
-          'This will clear all session records AND the scanned IP memory.\nNext scan will start fresh from the full IP pool.',
+          S.t.resetHistoryBody,
           style: GoogleFonts.inter(color: _textSecond, fontSize: 13, height: 1.5),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancel',
+            child: Text(S.t.cancel,
                 style: GoogleFonts.inter(color: _textSecond, fontWeight: FontWeight.w600)),
           ),
           TextButton(
@@ -77,7 +78,7 @@ class _RangeHistoryPageState extends State<RangeHistoryPage> {
               await RangeScanStorage().resetAll();
               if (mounted) _loadSessions();
             },
-            child: Text('Reset',
+            child: Text(S.t.reset,
                 style: GoogleFonts.inter(
                     color: const Color(0xFFFF5252), fontWeight: FontWeight.w700)),
           ),
@@ -90,8 +91,8 @@ class _RangeHistoryPageState extends State<RangeHistoryPage> {
     try {
       final dt = DateTime.parse(isoDate).toLocal();
       final months = [
-        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+        S.t.fa ? ['فرو', 'ار', 'خر', 'تیر', 'مر', 'شه', 'مه', 'آب', 'شه', 'مه', 'آذ', 'دی']
+        : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
       ];
       final d = dt.day.toString().padLeft(2, '0');
       final m = months[dt.month - 1];
@@ -129,7 +130,7 @@ class _RangeHistoryPageState extends State<RangeHistoryPage> {
         backgroundColor: _card2Color,
         elevation: 0,
         title: Text(
-          'Range History',
+          S.t.rangeHistory,
           style: GoogleFonts.inter(
               color: _accentLime, fontWeight: FontWeight.w700, fontSize: 17),
         ),
@@ -141,7 +142,7 @@ class _RangeHistoryPageState extends State<RangeHistoryPage> {
           IconButton(
             icon: const Icon(Icons.delete_sweep_rounded,
                 color: Color(0xFFFF5252)),
-            tooltip: 'Reset History',
+            tooltip: S.t.resetHistory,
             onPressed: _showResetDialog,
           ),
         ],
@@ -158,7 +159,7 @@ class _RangeHistoryPageState extends State<RangeHistoryPage> {
                           color: _textSecond, size: 48),
                       const SizedBox(height: 12),
                       Text(
-                        'No range scan history yet.',
+                        S.t.noHistoryYet,
                         style: GoogleFonts.inter(
                             color: _textSecond, fontSize: 15),
                       ),
@@ -235,17 +236,17 @@ class _RangeHistoryPageState extends State<RangeHistoryPage> {
             const SizedBox(height: 12),
 
             // ── Stats ─────────────────────────────────────────────────────
-            _statRow('Requested', _fmtNum(randomCount), 'Scanned', _fmtNum(totalScanned)),
+            _statRow(S.t.requested, _fmtNum(randomCount), S.t.scanned, _fmtNum(totalScanned)),
             const SizedBox(height: 4),
-            _statRow('✅ Alive', _fmtNum(aliveCount), '❌ Dead', _fmtNum(deadCount)),
+            _statRow(S.t.aliveLabel, _fmtNum(aliveCount), S.t.deadLabel, _fmtNum(deadCount)),
             const SizedBox(height: 4),
-            _statRow('⭐ Excellent', '$excellentCount', '✓ Good', '$goodCount'),
+            _statRow(S.t.excellentLabel, '\$excellentCount', S.t.goodLabel, '\$goodCount'),
             const SizedBox(height: 4),
-            _statRow('~ Usable', '$usableCount', '↓ Weak', '$weakCount'),
+            _statRow(S.t.usableLabel, '\$usableCount', S.t.weakLabel, '\$weakCount'),
             if (avgRtt > 0) ...[
               const SizedBox(height: 4),
               Row(children: [
-                Text('Avg RTT: ',
+                Text('${S.t.avgRtt}: ',
                     style: GoogleFonts.inter(
                         color: _textSecond, fontSize: 12)),
                 Text('${avgRtt.toStringAsFixed(1)} ms',
@@ -260,11 +261,11 @@ class _RangeHistoryPageState extends State<RangeHistoryPage> {
 
             // ── Top IPs ───────────────────────────────────────────────────
             if (topIps.isEmpty)
-              Text('No alive IPs found in this session.',
+              Text(S.t.noAliveInSession,
                   style: GoogleFonts.inter(
                       color: _textSecond, fontSize: 12))
             else ...[
-              Text('TOP IPs',
+              Text(S.t.topIps,
                   style: GoogleFonts.inter(
                       color: _textSecond,
                       fontWeight: FontWeight.w700,
@@ -348,7 +349,7 @@ class _RangeHistoryPageState extends State<RangeHistoryPage> {
                       Clipboard.setData(ClipboardData(text: text));
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('✓ Top 5 copied!',
+                          content: Text(S.t.top5CopiedMsg,
                               style: GoogleFonts.inter(
                                   color: _bgColor,
                                   fontWeight: FontWeight.w600)),
@@ -368,7 +369,7 @@ class _RangeHistoryPageState extends State<RangeHistoryPage> {
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: _borderColor),
                       ),
-                      child: Text('Copy Top 5',
+                      child: Text(S.t.copyTop5Btn,
                           style: GoogleFonts.inter(
                               color: _accentLime,
                               fontSize: 11,
@@ -387,7 +388,7 @@ class _RangeHistoryPageState extends State<RangeHistoryPage> {
                       }
                     }),
                     child: Text(
-                      isExpanded ? 'Collapse ▲' : 'Expand ▼',
+                      isExpanded ? S.t.collapseBtn : S.t.expandBtn,
                       style: GoogleFonts.inter(
                           color: _textSecond,
                           fontSize: 12,

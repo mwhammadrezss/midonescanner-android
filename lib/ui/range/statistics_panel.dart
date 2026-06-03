@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../engine/range/range_scan_engine.dart';
+import '../../core/l10n/strings.dart';
 
 const _accentLime  = Color(0xFFC6F135);
 const _textPrimary = Color(0xFFFFFFFF);
@@ -41,7 +42,7 @@ class StatisticsPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'LIVE STATS',
+            S.t.liveStats,
             style: GoogleFonts.inter(
               color: _textSecond,
               fontWeight: FontWeight.w700,
@@ -52,23 +53,23 @@ class StatisticsPanel extends StatelessWidget {
           const SizedBox(height: 10),
           Row(
             children: [
-              _tile('Probed', '${stats.totalProbed}', _textPrimary),
-              _tile('Alive', '${stats.totalAlive}', _accentLime),
-              _tile('Filtered', '${stats.totalFiltered}',
+              _tile(S.t.probed, '${stats.totalProbed}', _textPrimary),
+              _tile(S.t.alive, '${stats.totalAlive}', _accentLime),
+              _tile(S.t.filtered, '${stats.totalFiltered}',
                   const Color(0xFF60AAFF)),
-              _tile('Deep', '${stats.totalDeepScanned}',
+              _tile(S.t.deep, '${stats.totalDeepScanned}',
                   const Color(0xFFFFD060)),
             ],
           ),
           const SizedBox(height: 8),
           Row(
             children: [
-              _tile('Rate', rateStr, const Color(0xFF80E060)),
-              _tile('Concurrency', '${stats.currentConcurrency}',
+              _tile(S.t.rate, rateStr, const Color(0xFF80E060)),
+              _tile(S.t.concurrency, '${stats.currentConcurrency}',
                   const Color(0xFFFFAB40)),
-              _tile('Avg TCP',
+              _tile(S.t.avgTcp,
                   '${stats.avgTcpMs.toStringAsFixed(0)}ms', _textSecond),
-              _tile('Elapsed', _fmt(stats.elapsed), _textSecond),
+              _tile(S.t.elapsed, _fmt(stats.elapsed), _textSecond),
             ],
           ),
         ],

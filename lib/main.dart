@@ -447,7 +447,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         setState(() {
           _scanning = true;
           _cancelled = false;
-          _statusText = 'Scanning ${_importedIps.length} imported IPs...';
+          _statusText = '${S.t.scanning} ${_importedIps.length} IPs...';
         });
         _runScan(
           List<String>.from(_importedIps),
@@ -475,7 +475,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         _scanning = true;
         _cancelled = false;
-        _statusText = 'Sampling IPs from ${activeCidrs.length} range(s)...';
+        _statusText = S.t.fa ? 'نمونه‌گیری از ${activeCidrs.length} رنج...' : 'Sampling IPs from ${activeCidrs.length} range(s)...';
       });
 
       try {
@@ -487,18 +487,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
 
         if (sampledIps.isEmpty) {
-          if (mounted) setState(() { _scanning = false; _statusText = 'All IPs already scanned.'; });
+          if (mounted) setState(() { _scanning = false; _statusText = S.t.fa ? 'همه IP‌ها قبلاً اسکن شده‌اند.' : 'All IPs already scanned.'; });
           _showSnack('No new IPs. Go to History â†’ Reset to start fresh.');
           return;
         }
         if (_cancelled) {
-          if (mounted) setState(() { _scanning = false; _statusText = 'Cancelled.'; });
+          if (mounted) setState(() { _scanning = false; _statusText = S.t.fa ? 'لغو شد.' : 'Cancelled.'; });
           return;
         }
         _runFastRangeScan(sampledIps);
       } catch (e) {
-        if (mounted) setState(() { _scanning = false; _statusText = 'Error: $e'; });
-        _showSnack('Error: $e');
+        if (mounted) setState(() { _scanning = false; _statusText = '${S.t.error}: $e'; });
+        _showSnack('${S.t.error}: $e');
       }
       return;
     }
@@ -506,9 +506,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // â”€â”€ CDN mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // FIX: Support CIDR input (e.g. 104.16.0.0/24) â€” expand to individual IPs
     final ips = _expandCidrOrIps(_ipController.text);
-    if (ips.isEmpty) { _showSnack('No valid IPs found! Check your input.'); return; }
+    if (ips.isEmpty) { _showSnack(S.t.noValidIps); return; }
     // Safety limit to prevent memory issues with huge CIDRs
-    if (ips.length > 50000) { _showSnack('Too many IPs (${ips.length}). Max 50,000.'); return; }
+    if (ips.length > 50000) { _showSnack('${S.t.tooManyIps} (${ips.length}). Max 50,000.'); return; }
     if (_cdnSubMode == CdnSubMode.deep) {
       _showSniPickerDialog(ips);
       return;
@@ -664,7 +664,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } catch (e) {
       if (mounted) {
         setState(() { _statusText = 'Scan error: $e'; });
-        _showSnack('Scan error: $e');
+        _showSnack('${S.t.scanErrorMsg}: $e');
       }
     } finally {
       _stopBatchTimer();
@@ -1037,7 +1037,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _scanning = false;
       _prefiltering = false;
       _displayDirty = true;
-      _statusText = 'Stopped (${_results.length} results so far)';
+      _statusText = S.t.fa ? 'متوقف شد (${_results.length} نتیجه)' : 'Stopped (${_results.length} results so far)';
     });
   }
 
@@ -1136,21 +1136,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _copyTop5() {
     final top5 = _displayResults.where((r) => r.isAlive || r.tier == IpTier.usable || r.tier == IpTier.weak).take(5).toList();
-    if (top5.isEmpty) { _showSnack('No results!'); return; }
+    if (top5.isEmpty) { _showSnack(S.t.noResultsSnack); return; }
     Clipboard.setData(ClipboardData(text: top5.map((r) => r.ip).join('\n')));
     _showSnack('âœ“ Top 5 copied!');
   }
 
   void _copyAll() {
     final list = _displayResults.where((r) => r.isAlive).toList();
-    if (list.isEmpty) { _showSnack('No alive results!'); return; }
+    if (list.isEmpty) { _showSnack(S.t.noAliveSnack); return; }
     Clipboard.setData(ClipboardData(text: list.map((r) => r.ip).join('\n')));
     _showSnack('âœ“ All ${list.length} IPs copied!');
   }
 
   // p40: export JSON
   Future<void> _exportJson() async {
-    if (_results.isEmpty) { _showSnack('No results!'); return; }
+    if (_results.isEmpty) { _showSnack(S.t.noResultsSnack); return; }
     try {
       final dir = Platform.isAndroid ? (await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory()) : await getApplicationDocumentsDirectory();
       final folder = Directory('${dir.path}/MidONeScanner');
@@ -1171,11 +1171,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         'results': data,
       }));
       _showSnack('âœ“ JSON saved: scan_$ts.json');
-    } catch (e) { _showSnack('Export error: $e'); }
+    } catch (e) { _showSnack('${S.t.scanErrorMsg}: $e'); }
   }
 
   Future<void> _saveResults() async {
-    if (_results.isEmpty) { _showSnack('No results!'); return; }
+    if (_results.isEmpty) { _showSnack(S.t.noResultsSnack); return; }
     try {
       final dir = Platform.isAndroid ? (await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory()) : await getApplicationDocumentsDirectory();
       final folder = Directory('${dir.path}/MidONeScanner');
@@ -1199,15 +1199,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       await file.writeAsString(buf.toString());
       _showSnack('âœ“ Saved: scan_$ts.txt');
-    } catch (e) { _showSnack('Save error: $e'); }
+    } catch (e) { _showSnack('${S.t.scanErrorMsg}: $e'); }
   }
 
   // p41: retest all failed IPs
   // BUG 13 FIX: run retests in concurrent batches instead of sequentially
   Future<void> _retestFailed() async {
     final failed = _results.where((r) => !r.isAlive).toList();
-    if (failed.isEmpty) { _showSnack('No failed IPs to retest!'); return; }
-    _showSnack('Retesting ${failed.length} failed IPs...');
+    if (failed.isEmpty) { _showSnack(S.t.noFailedIps); return; }
+    _showSnack('${S.t.retestingIp} ${failed.length}...');
 
     const batchSize = 8;
     for (int i = 0; i < failed.length; i += batchSize) {
@@ -1516,7 +1516,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _applyDns(String ip, {bool secondary = false}) async {
     if (!Platform.isWindows) {
-      _showSnack('Apply DNS is only supported on Windows.');
+      _showSnack(S.t.applyDnsWindows);
       return;
     }
     if (!mounted) return;
@@ -2100,7 +2100,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 onPressed: _dnsVpnStarting ? null : () {
                   final d1 = _manualDns1Controller.text.trim();
                   final d2 = _manualDns2Controller.text.trim();
-                  if (d1.isEmpty) { _showSnack('Enter at least DNS 1'); return; }
+                  if (d1.isEmpty) { _showSnack(S.t.enterDns1); return; }
                   _startDnsVpn(d1, dns2: d2.isEmpty ? null : d2);
                 },
                 icon: _dnsVpnStarting
@@ -2176,7 +2176,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (mounted) {
         setState(() { _dnsVpnStarting = false; });
         if (e.code == 'VPN_DENIED') {
-          _showSnack('VPN permission denied. Please allow it and try again.');
+          _showSnack(S.t.fa ? 'دسترسی VPN رد شد. لطفاً اجازه بده و دوباره امتحان کن.' : 'VPN permission denied. Please allow it and try again.');
         } else {
           _showSnack('Failed to start DNS VPN: \${e.message}');
         }
@@ -2199,7 +2199,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _dnsVpnActiveDns1 = null;
           _dnsVpnActiveDns2 = null;
         });
-        _showSnack('DNS VPN stopped.');
+        _showSnack(S.t.dnsVpnStopped);
       }
     } catch (e) {
       _showSnack('Error stopping VPN: \$e');
@@ -2677,7 +2677,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _copyTop5Dns() {
     if (_dnsResults == null || _dnsResults!.isEmpty) {
-      _showSnack('No DNS results yet!');
+      _showSnack(S.t.noDnsResults);
       return;
     }
     final top5 = _dnsResults!.take(5).toList();
@@ -3376,7 +3376,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _importedIps = ips;
         _importedIpsProvider = 'akamai';
       });
-      _showSnack('Imported ${ips.length} IPs (Akamai fast scan)');
+      _showSnack('${S.t.importedIps}: ${ips.length} IPs');
     } catch (e) {
       if (!mounted) return;
       _showSnack('âŒ Ø®Ø·Ø§: ${e.toString()}');
@@ -4006,7 +4006,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _retestCard(ScanResult original) async {
-    _showSnack('Retesting ${original.ip}...');
+    _showSnack('${S.t.retestingIp} ${original.ip}...');
     final result = await scanOneIp(original.ip);
     if (!mounted) return;
     setState(() {

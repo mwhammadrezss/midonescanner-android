@@ -36,7 +36,7 @@ class CfResultsPage extends StatelessWidget {
               await Clipboard.setData(ClipboardData(text: text));
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(S.t.fa ? 'کپی شد' : 'Copied')),
+                  SnackBar(content: Text(S.t.copied)),
                 );
               }
             },

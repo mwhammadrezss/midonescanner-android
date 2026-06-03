@@ -146,4 +146,90 @@ class S {
   // ── Persian Language Label ───────────────────────────────────
   String get faLabel         => 'فارسی';
   String get enLabel         => 'English';
+
+  // ── Range Scan Page ─────────────────────────────────────────────────
+  String get selectCidr      => fa ? 'انتخاب رنج CIDR'      : 'SELECT CIDR';
+  String get scanModeLabel   => fa ? 'حالت اسکن'             : 'SCAN MODE';
+  String get scanProfile     => fa ? 'پروفایل اسکن'          : 'SCAN PROFILE';
+  String get fastMode        => fa ? 'سریع'                  : 'Fast';
+  String get fastModeSub     => fa ? 'TCP فقط · فوق سریع'   : 'TCP only · Ultra fast';
+  String get normalScanMode  => fa ? 'عادی'                  : 'Normal';
+  String get normalScanSub   => fa ? 'TLS + تونل'            : 'TLS + Tunnel';
+  String get deepScanMode    => fa ? 'عمیق'                  : 'Deep';
+  String get deepScanModeSub => fa ? 'آنالیز کامل'           : 'Full analysis';
+  String get stopLabel       => fa ? 'توقف'                  : 'STOP';
+  String get startScanBtn    => fa ? 'شروع اسکن'             : 'START SCAN';
+  String get configTab       => fa ? 'تنظیم'                 : 'Config';
+  String get resultsTab      => fa ? 'نتایج'                 : 'Results';
+  String get cdnProvider     => fa ? 'ارائه‌دهنده CDN'        : 'CDN PROVIDER';
+  String get concurrency     => fa ? 'همزمانی'               : 'CONCURRENCY';
+  String get selectCidrFirst => fa ? 'ابتدا یک رنج CIDR انتخاب کن' : 'Select a CIDR range first';
+  String get scanComplete    => fa ? 'اسکن تمام شد'          : 'Scan complete';
+  String get scanErrorMsg    => fa ? 'خطای اسکن'             : 'Scan error';
+
+  // ── Statistics Panel ─────────────────────────────────────────────────
+  String get liveStats       => fa ? 'آمار زنده'             : 'LIVE STATS';
+  String get probed          => fa ? 'بررسی‌شده'              : 'Probed';
+  String get alive           => fa ? 'زنده'                  : 'Alive';
+  String get filtered        => fa ? 'فیلتر‌شده'              : 'Filtered';
+  String get deep            => fa ? 'عمیق'                  : 'Deep';
+  String get rate            => fa ? 'نرخ'                   : 'Rate';
+  String get avgTcp          => fa ? 'میانگین TCP'            : 'Avg TCP';
+  String get elapsed         => fa ? 'گذشته'                 : 'Elapsed';
+
+  // ── Top IPs Panel ────────────────────────────────────────────────────
+  String get topIps          => fa ? 'برترین IP‌ها'           : 'TOP IPs';
+  String get copyAll2        => fa ? 'کپی همه'               : 'Copy All';
+
+  // ── Live Results Panel ───────────────────────────────────────────────
+  String get noResultsRange  => fa ? 'هنوز نتیجه‌ای نیست.\nاسکن را شروع کن تا IP پیدا بشه.'
+                                   : 'No results yet.\nStart scanning to discover IPs.';
+  String get copiedIp        => fa ? 'کپی شد'               : 'Copied';
+
+  // ── Range History Page ───────────────────────────────────────────────
+  String get rangeHistory    => fa ? 'تاریخچه اسکن رنج'      : 'Range History';
+  String get resetHistory    => fa ? 'پاک کردن تاریخچه'      : 'Reset History';
+  String get resetHistoryQ   => fa ? 'پاک کردن تاریخچه؟'    : 'Reset History?';
+  String get resetHistoryBody => fa
+      ? 'همه سشن‌ها و حافظه IP اسکن‌شده پاک می‌شه.\nاسکن بعدی از اول شروع می‌شه.'
+      : 'This will clear all session records AND the scanned IP memory.\nNext scan will start fresh from the full IP pool.';
+  String get reset           => fa ? 'پاک کن'                : 'Reset';
+  String get noHistoryYet    => fa ? 'هنوز تاریخچه‌ای نیست.' : 'No range scan history yet.';
+  String get noAliveInSession => fa ? 'هیچ IP زنده‌ای در این سشن پیدا نشد.' : 'No alive IPs found in this session.';
+  String get copyTop5Btn     => fa ? 'کپی ۵ تا برتر'        : 'Copy Top 5';
+  String get top5CopiedMsg   => fa ? '✓ ۵ تا برتر کپی شد!' : '✓ Top 5 copied!';
+  String get collapseBtn     => fa ? 'بستن ▲'               : 'Collapse ▲';
+  String get expandBtn       => fa ? 'باز کردن ▼'            : 'Expand ▼';
+  String get avgRtt          => fa ? 'میانگین RTT'           : 'Avg RTT';
+  String get requested       => fa ? 'درخواست‌شده'            : 'Requested';
+  String get scanned         => fa ? 'اسکن‌شده'               : 'Scanned';
+  String get aliveLabel      => fa ? '✅ زنده'               : '✅ Alive';
+  String get deadLabel       => fa ? '❌ مرده'               : '❌ Dead';
+  String get excellentLabel  => fa ? '⭐ عالی'               : '⭐ Excellent';
+  String get goodLabel       => fa ? '✓ خوب'                : '✓ Good';
+  String get usableLabel     => fa ? '~ قابل استفاده'        : '~ Usable';
+  String get weakLabel       => fa ? '↓ ضعیف'               : '↓ Weak';
+
+  // ── main.dart snack messages ─────────────────────────────────────────
+  String get noNewIps        => fa ? 'IP جدیدی نیست. به تاریخچه برو → ریست کن.' : 'No new IPs. Go to History → Reset to start fresh.';
+  String get noValidIps      => fa ? 'IP معتبری پیدا نشد! ورودی رو بررسی کن.' : 'No valid IPs found! Check your input.';
+  String get tooManyIps      => fa ? 'تعداد IP خیلی زیاده' : 'Too many IPs';
+  String get retestDone      => fa ? '✓ بررسی مجدد تمام شد!' : '✓ Retest done!';
+  String get noFailedIps     => fa ? 'هیچ IP ناموفقی برای بررسی مجدد نیست!' : 'No failed IPs to retest!';
+  String get noResultsSnack  => fa ? 'نتیجه‌ای نیست!' : 'No results!';
+  String get noAliveSnack    => fa ? 'نتیجه زنده‌ای نیست!' : 'No alive results!';
+  String get allCopied       => fa ? '✓ همه IP‌ها کپی شد!' : '✓ All IPs copied!';
+  String get noDnsResults    => fa ? 'هنوز نتیجه DNS نیست!' : 'No DNS results yet!';
+  String get applyDnsWindows => fa ? 'اعمال DNS فقط روی ویندوز پشتیبانی می‌شه.' : 'Apply DNS is only supported on Windows.';
+  String get dnsVpnStopped   => fa ? 'DNS VPN متوقف شد.' : 'DNS VPN stopped.';
+  String get enterDns1       => fa ? 'حداقل DNS 1 رو وارد کن' : 'Enter at least DNS 1';
+  String get importedIps     => fa ? 'IP وارد شد' : 'Imported';
+  String get retestingIp     => fa ? 'بررسی مجدد' : 'Retesting';
+  String get failed          => fa ? 'ناموفق' : 'Failed';
+  String get configError     => fa ? 'خطای کانفیگ' : 'Config error';
+  String get noIpsInFile     => fa ? 'فایل IP خالی است' : 'No IPs in file';
+  String get noWorkingEp     => fa ? 'endpoint سالم نیست' : 'No working endpoints';
+  String get doneEndpoints   => fa ? 'تمام' : 'Done';
+  String get cfSaved         => fa ? 'ذخیره شد' : 'Saved';
+
 }

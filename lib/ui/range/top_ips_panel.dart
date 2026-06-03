@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../engine/range/live_result_store.dart';
+import '../../core/l10n/strings.dart';
 
 const _accentLime  = Color(0xFFC6F135);
 const _accentLime2 = Color(0xFFA8D400);
@@ -55,7 +56,7 @@ class TopIpsPanel extends StatelessWidget {
               const Icon(Icons.star_rounded, color: Color(0xFFFFD700), size: 14),
               const SizedBox(width: 6),
               Text(
-                'TOP IPs',
+                S.t.topIps,
                 style: GoogleFonts.inter(
                   color: _textSecond,
                   fontWeight: FontWeight.w700,
@@ -84,7 +85,7 @@ class TopIpsPanel extends StatelessWidget {
                       const Icon(Icons.copy_rounded,
                           size: 12, color: _accentLime),
                       const SizedBox(width: 4),
-                      Text('Copy All',
+                      Text(S.t.copyAll2,
                           style: GoogleFonts.inter(
                               color: _accentLime,
                               fontSize: 11,

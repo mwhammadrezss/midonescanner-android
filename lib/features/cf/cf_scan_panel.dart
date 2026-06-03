@@ -106,13 +106,13 @@ class _CfScanPanelState extends State<CfScanPanel> {
       final raw = _configCtrl.text.trim();
       if (raw.isNotEmpty) cfg = parseProxyUrl(raw);
     } catch (e) {
-      _snack('Config error: $e');
+      _snack('\${S.t.configError}: \$e');
       return;
     }
 
     final ips = _sourceMode == 1 ? _fileIps : <String>[];
     if (_sourceMode == 1 && ips.isEmpty) {
-      _snack(S.t.fa ? 'فایل IP خالی است' : 'No IPs in file');
+      _snack(S.t.noIpsInFile);
       return;
     }
 
@@ -174,14 +174,12 @@ class _CfScanPanelState extends State<CfScanPanel> {
         _phase2 = results;
         _scanning = false;
         final ok = results.where((r) => r.success).length;
-        _status = S.t.fa
-            ? 'تمام — $ok endpoint سالم'
-            : 'Done — $ok working endpoints';
+        _status = S.t.fa ? 'تمام — \$ok endpoint سالم' : '\${S.t.doneEndpoints} — \$ok working endpoints';
       });
 
       final livePath = await _liveWriter?.finish();
       if (livePath != null && Platform.isWindows) {
-        _snack(S.t.fa ? 'ذخیره: $livePath' : 'Saved: $livePath');
+        _snack(S.t.fa ? 'ذخیره: \$livePath' : 'Saved: \$livePath');
       }
 
       if (mounted && results.isNotEmpty) {
@@ -213,16 +211,16 @@ class _CfScanPanelState extends State<CfScanPanel> {
         .map((r) => '${r.ip}:${r.phase1.port}')
         .toList();
     if (lines.isEmpty) {
-      _snack(S.t.fa ? 'endpoint سالم نیست' : 'No working endpoints');
+      _snack(S.t.noWorkingEp);
       return;
     }
     await ExportService.copyToClipboard(lines.join('\n'));
-    _snack(S.t.fa ? 'کپی شد' : 'Copied');
+    _snack(S.t.copied);
   }
 
   Future<void> _exportResults() async {
     final buf = StringBuffer();
-    buf.writeln('# MidONe Scanner CF export');
+    buf.writeln('# MidONe Scanner CF Export');
     for (final r in _phase2) {
       final mark = r.success ? '✓' : '✗';
       buf.writeln(
@@ -256,7 +254,7 @@ class _CfScanPanelState extends State<CfScanPanel> {
           Row(
             children: [
               Expanded(
-                child: Text('CLOUDFLARE — SenPai',
+                child: Text(S.t.fa ? 'کلودفلر — SenPai' : 'CLOUDFLARE — SenPai',
                     style: GoogleFonts.inter(
                         color: _textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
               ),
