@@ -1,0 +1,160 @@
+name: 🦁 MidONe Scanner — Build & Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  read-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 📋 Read version from pubspec.yaml
+        id: ver
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | tr -d '[:space:]')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+  build-android:
+    runs-on: ubuntu-latest
+    needs: read-version
+    steps:
+      - uses: actions/checkout@v4
+      - name: ☕ Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: 🐦 Setup Flutter 3.24.0
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: stable
+      - name: 📦 Get packages
+        run: flutter pub get
+      - name: 📁 Ensure assets/xray dir exists
+        run: |
+          mkdir -p assets/xray
+          echo "✅ assets/xray ready (xray binary not bundled — TLS-only mode)"
+      - name: 🔨 Build APK
+        run: flutter build apk --release --no-shrink
+      - name: ✅ Verify APK
+        run: |
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          ls -lh $APK
+      - name: 📦 Rename APK
+        run: |
+          VERSION=${{ needs.read-version.outputs.version }}
+          CLEAN=$(echo $VERSION | cut -d'+' -f1)
+          cp build/app/outputs/flutter-apk/app-release.apk \
+             build/app/outputs/flutter-apk/MidONeScannerV${CLEAN}.apk
+          echo "APK_NAME=MidONeScannerV${CLEAN}.apk" >> $GITHUB_ENV
+          echo "VERSION_CLEAN=$CLEAN" >> $GITHUB_ENV
+      - name: 💾 Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: build/app/outputs/flutter-apk/MidONeScannerV*.apk
+
+  build-windows:
+    runs-on: windows-latest
+    needs: read-version
+    steps:
+      - uses: actions/checkout@v4
+      - name: 🐦 Setup Flutter 3.24.0
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: stable
+      - name: 🖥 Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+      - name: 📦 Get packages
+        run: flutter pub get
+      - name: 🏗 Create windows platform files if missing
+        run: |
+          if (!(Test-Path "windows")) { flutter create --platforms=windows . }
+        shell: pwsh
+      - name: 📁 Ensure assets/xray dir exists (required by pubspec.yaml)
+        run: |
+          New-Item -ItemType Directory -Force -Path assets/xray | Out-Null
+          echo "✅ assets/xray ready"
+        shell: pwsh
+      - name: 🔨 Build Windows Release
+        run: flutter build windows --release
+      - name: ✅ Verify EXE
+        run: |
+          $exe = Get-ChildItem -Recurse build/windows -Filter "*.exe" | Select-Object -First 1
+          Write-Host "EXE: $($exe.FullName) ($([math]::Round($exe.Length/1MB,1)) MB)"
+        shell: pwsh
+      - name: 📋 Copy VC++ Runtime DLLs
+        run: |
+          $buildDir = "build\windows\x64\runner\Release"
+          $vcRedist = "${env:VCToolsRedistDir}x64\Microsoft.VC143.CRT"
+          if (Test-Path $vcRedist) {
+            Copy-Item "$vcRedist\*.dll" $buildDir -Force
+            Write-Host "✅ VC++ DLLs copied"
+          } else {
+            Write-Host "⚠️ VC++ redist path not found, skipping"
+          }
+        shell: pwsh
+      - name: 📥 Download xray-core for Windows
+        run: |
+          $url = "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-windows-64.zip"
+          Invoke-WebRequest -Uri $url -OutFile xray-win.zip
+          Expand-Archive xray-win.zip -DestinationPath xray-tmp
+          Copy-Item xray-tmp/xray.exe "build\windows\x64\runner\Release\" -Force
+          Write-Host "✅ xray.exe copied"
+        shell: pwsh
+        continue-on-error: true
+      - name: 📦 Package as ZIP
+        run: |
+          $VERSION = "${{ needs.read-version.outputs.version }}"
+          $CLEAN = $VERSION.Split('+')[0]
+          $zipName = "MidONe-Scanner-Windows-v${CLEAN}.zip"
+          Compress-Archive -Path "build\windows\x64\runner\Release\*" -DestinationPath $zipName
+          echo "WIN_ZIP=$zipName" >> $env:GITHUB_ENV
+          echo "VERSION_CLEAN=$CLEAN" >> $env:GITHUB_ENV
+          Write-Host "✅ Packaged: $zipName"
+        shell: pwsh
+      - name: ✅ Verify ZIP contents
+        run: |
+          Expand-Archive -Path $env:WIN_ZIP -DestinationPath zip-check
+          Get-ChildItem zip-check | Format-Table Name, Length
+        shell: pwsh
+      - name: 💾 Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip
+          path: MidONe-Scanner-Windows-v*.zip
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [read-version, build-android, build-windows]
+    permissions:
+      contents: write
+    steps:
+      - name: 📥 Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+      - name: 🏷 Set version vars
+        run: |
+          VERSION=${{ needs.read-version.outputs.version }}
+          CLEAN=$(echo $VERSION | cut -d'+' -f1)
+          echo "VERSION_CLEAN=$CLEAN" >> $GITHUB_ENV
+      - name: 🚀 Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION_CLEAN }}
+          name: "🦁 MidONe Scanner — v${{ env.VERSION_CLEAN }}"
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/android-apk/*.apk
+            artifacts/windows-zip/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
