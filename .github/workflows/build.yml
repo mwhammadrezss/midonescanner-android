@@ -24,11 +24,34 @@ jobs:
           echo "tag=v$VERSION" >> $GITHUB_OUTPUT
           echo "✅ Version: $VERSION"
 
+
+  # ─────────────────────────────────────────
+  #  🔍 آنالیز استاتیک — گیت قبل از build
+  # ─────────────────────────────────────────
+  analyze:
+    needs: read-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🐦 Setup Flutter (analyze)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: stable
+          cache: true
+
+      - name: 📦 Get packages
+        run: flutter pub get
+
+      - name: 🔍 Dart Analyze
+        run: flutter analyze lib/
+
   # ─────────────────────────────────────────
   #  مرحله ۲: Build Android APK
   # ─────────────────────────────────────────
   build-android:
-    needs: read-version
+    needs: [read-version, analyze]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -79,7 +102,7 @@ jobs:
   #  مرحله ۳: Build Windows EXE
   # ─────────────────────────────────────────
   build-windows:
-    needs: read-version
+    needs: [read-version, analyze]
     runs-on: windows-latest
     permissions:
       contents: write
