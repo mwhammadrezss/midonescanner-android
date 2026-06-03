@@ -398,3 +398,70 @@ Future<ScanResult> _cdnScanWithSni(
     realUsabilityIndex: rui,
   );
 }
+
+/// CDN Normal — Fast: TCP:443 only, no tunnel (very fast, like range Akamai).
+Future<List<ScanResult>> runCdnFastScanEngine(
+  List<String> ips, {
+  void Function(int done, int total, ScanResult result)? onProgress,
+  void Function(int liveCount, int totalCount)? onPrefilterDone,
+  bool Function()? isCancelled,
+}) async {
+  final results = <ScanResult>[];
+  var done = 0;
+  final cancelCheck = isCancelled ?? () => false;
+
+  const concurrency = 100;
+  const timeoutMs = 1500;
+  final probe = FastProbeEngine(defaultTimeoutMs: timeoutMs);
+  final sem = Semaphore(concurrency);
+
+  final liveResults = await Future.wait(ips.map((ip) async {
+    if (cancelCheck()) return null;
+    await sem.acquire();
+    try {
+      if (cancelCheck()) return null;
+      final (country, flag) = GeoIPOffline().lookupFull(ip);
+      final r = await probe.probe(ip, timeoutMs: timeoutMs);
+      if (!r.alive) return null;
+      final latency = r.tcpMs;
+      return ScanResult(
+        ip: ip,
+        latencyMs: double.parse(latency.toStringAsFixed(1)),
+        jitterMs: 0,
+        isAlive: true,
+        grade: latency < 80 ? 'A' : latency < 150 ? 'B' : latency < 300 ? 'C' : 'D',
+        country: country,
+        flag: flag,
+        loss: 0,
+        reliability: 1.0,
+        score: (100 - (latency / 8).clamp(0, 90)).toDouble(),
+        survivalMs: null,
+        retransmits: 0,
+        phase: ScanPhase.passed,
+        tier: latency < 100
+            ? IpTier.excellent
+            : latency < 200
+                ? IpTier.good
+                : IpTier.usable,
+        dpiSuspicion: 0,
+        tcpLatencyMs: latency,
+      );
+    } finally {
+      sem.release();
+    }
+  }));
+
+  final live = liveResults.whereType<ScanResult>().toList();
+  onPrefilterDone?.call(live.length, ips.length);
+  if (live.isEmpty || cancelCheck()) return results;
+
+  for (final r in live) {
+    if (cancelCheck()) break;
+    results.add(r);
+    done++;
+    onProgress?.call(done, live.length, r);
+  }
+
+  results.sort((a, b) => a.latencyMs.compareTo(b.latencyMs));
+  return results;
+}

@@ -28,8 +28,9 @@ import 'engine/range_ip_sampler.dart';
 import 'ui/range/range_history_page.dart';
 import 'dns_scanner/scanner.dart';
 import 'dns_scanner/dns_servers.dart';
-import 'utils/scan_profiles.dart';
 import 'engine/cdn_scan_engine.dart';
+import 'app/app_palette.dart';
+import 'app/l10n.dart';
 import 'engine/cf_ip_ranges.dart';
 import 'engine/cf_xray_scan_engine.dart';
 import 'xray/config_parser.dart';
@@ -61,6 +62,7 @@ Future<void> sendNotification(String title, String body) async {
 
 enum ScanTab { cdn, cloudflare, range, dns }
 enum CdnSubMode { normal, deep }
+enum CdnNormalVariant { standard, fast }
 
 // ─── Cloudflare Result ────────────────────────────────────────────────────────
 
@@ -84,21 +86,7 @@ class CloudflareResult {
   bool get isEdge => tlsOk && httpStatus >= 200 && httpStatus < 400 && colo.isNotEmpty;
 }
 
-// ─── Forest Green Theme ─────────────────────────────────────────────────────
-
-const bgColor      = Color(0xFF0A1A0F);
-const cardColor    = Color(0xFF112216);
-const card2Color   = Color(0xFF0D1A11);
-const cardInner    = Color(0xFF1A3020);
-const accentLime   = Color(0xFFC6F135);
-const accentLime2  = Color(0xFFA8D400);
-const textPrimary  = Color(0xFFFFFFFF);
-const textSecond   = Color(0xFF8A9E8E);
-const iconBg       = Color(0xFF1E3525);
-const borderColor  = Color(0xFF2A4A30);
-const statusGreen  = Color(0xFF1A3A1E);
-const statusRed    = Color(0xFF3A1A1A);
-const statusOrange = Color(0xFF3A2A1A);
+// Colors: lib/app/app_palette.dart (forest / dark themes)
 
 Color gradeColor(ScanResult r) {
   if (!r.isAlive) return const Color(0xFFFF5252);
@@ -139,6 +127,7 @@ void main() async {
     await initNotifications();
   }
   await GeoIPOffline().load();
+  applyAppPalette('forest');
   runApp(const MidOneScannerApp());
 }
 
@@ -152,10 +141,19 @@ class MidOneScannerApp extends StatelessWidget {
       theme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: bgColor,
-        colorScheme: const ColorScheme.dark(
-          primary: accentLime, secondary: accentLime2, surface: cardColor,
+        canvasColor: bgColor,
+        cardColor: cardColor,
+        dividerColor: borderColor,
+        colorScheme: ColorScheme.dark(
+          primary: accentLime,
+          secondary: accentLime2,
+          surface: cardColor,
+          onSurface: textPrimary,
         ),
-        textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
+        appBarTheme: AppBarTheme(backgroundColor: card2Color, foregroundColor: textPrimary),
+        dialogTheme: DialogThemeData(backgroundColor: cardColor),
+        snackBarTheme: SnackBarThemeData(backgroundColor: accentLime, contentTextStyle: TextStyle(color: bgColor)),
+        textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme).apply(bodyColor: textPrimary, displayColor: textPrimary),
       ),
       home: const HomeScreen(),
     );
@@ -176,6 +174,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // ── Scan Tab (replaces _mode) ─────────────────────────────────────────────
   ScanTab _activeScanTab = ScanTab.cdn;
   CdnSubMode _cdnSubMode = CdnSubMode.normal;
+  CdnNormalVariant _cdnNormalVariant = CdnNormalVariant.standard;
   bool _scanning = false;
   bool _cancelled = false;
   bool _paused = false;         // p44: pause/resume
@@ -185,7 +184,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   final _ipController = TextEditingController();
   List<ScanResult> _results = [];
-  String _statusText = 'آماده اسکن...';
+  String _statusText = 'Ready to scan...';
   String _sortBy = 'speed';  // default: sort by score
   // BUG 9 FIX: removed _filterThrottled — dead code, no UI toggle existed.
   // The 'alive' advanced filter covers this use case.
@@ -210,7 +209,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _dpiKills = 0;
 
   // Deep mode SNI selection
-  Set<String> _selectedSnis = {'www.google.com'};
+  Set<String> _selectedSnis = {'www.google.com', 'speed.cloudflare.com'};
   final _customSniController = TextEditingController();
 
   // ── Cloudflare tab state ─────────────────────────────────────────────────
@@ -218,7 +217,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _cfScanning = false;
   bool _cfCancelled = false;
   int _cfDone = 0, _cfTotal = 0;
-  String _cfStatus = 'آماده اسکن IP‌های کلودفلر...';
+  String _cfStatus = 'Ready to scan Cloudflare IPs...';
 
   // ── CF Xray scanner state (SenPai-style two-phase) ────────────────────────
   // Config URL for Xray phase-2 validation
@@ -247,7 +246,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Settings (persisted)
   bool _usePersian = true;
   String _appTheme = 'forest'; // forest | dark
-  String _selectedProfile = 'balanced';
 
   // Phase 1 results (all probed IPs)
   List<CfPhase1Result> _cfPhase1Results = [];
@@ -310,7 +308,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final List<double> _dnsMonLatHistory = [];
 
   // ── Range v2 state ────────────────────────────────────────────────────────
-  String _rangeCdnProfile = 'cloudflare'; // 'cloudflare' or 'akamai'
+  // Range: Akamai only (Cloudflare profile removed)
   List<String> _rangeCidrs = [];
   Set<String> _selectedRangeCidrs = {}; // multi-select
   bool _loadingRangeCidrs = false;
@@ -365,11 +363,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     setState(() {
       _usePersian = prefs.getString('app_lang') != 'en';
       _appTheme = prefs.getString('app_theme') ?? 'forest';
-      _selectedProfile = prefs.getString('scan_profile') ?? 'balanced';
-      _cdnTestMultiplier = prefs.getInt('cdn_test_multiplier')?.clamp(1, 6) ?? 2;
-      // Update initial status texts to match loaded language
-      if (!_scanning) _statusText = _usePersian ? 'آماده اسکن...' : 'Ready to scan...';
-      if (!_cfScanning) _cfStatus = _usePersian ? 'آماده اسکن IP‌های کلودفلر...' : 'Ready to scan Cloudflare IPs...';
+      _cdnTestMultiplier = prefs.getInt('cdn_test_multiplier')?.clamp(1, 6) ?? 3;
+      applyAppPalette(_appTheme);
+      if (!_scanning) _statusText = L10n(_usePersian).readyScan;
+      if (!_cfScanning) _cfStatus = L10n(_usePersian).cfReady;
     });
   }
 
@@ -377,16 +374,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('app_lang', _usePersian ? 'fa' : 'en');
     await prefs.setString('app_theme', _appTheme);
-    await prefs.setString('scan_profile', _selectedProfile);
     await prefs.setInt('cdn_test_multiplier', _cdnTestMultiplier);
   }
 
-  String _tr(String en, String fa) => _usePersian ? fa : en;
+  L10n get _l => L10n(_usePersian);
+  String _tr(String en, String faStr) => _usePersian ? faStr : en;
 
   void _showSettingsSheet() {
     var langFa = _usePersian;
     var theme = _appTheme;
-    var profile = _selectedProfile;
     showModalBottomSheet(
       context: context,
       backgroundColor: cardColor,
@@ -399,11 +395,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(_tr('Settings', 'تنظیمات'),
+              Text(_l.settings,
                   style: GoogleFonts.inter(
                       color: accentLime, fontWeight: FontWeight.w800, fontSize: 18)),
               const SizedBox(height: 16),
-              Text(_tr('Language', 'زبان'),
+              Text(_l.language,
                   style: GoogleFonts.inter(color: textSecond, fontSize: 12, fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               Row(
@@ -418,48 +414,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ],
               ),
               const SizedBox(height: 16),
-              Text(_tr('Theme', 'تم'),
+              Text(_l.theme,
                   style: GoogleFonts.inter(color: textSecond, fontSize: 12, fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               Row(
                 children: [
                   Expanded(
-                    child: _settingsChip(_tr('Forest', 'سبز'), theme == 'forest',
+                    child: _settingsChip(_l.themeForest, theme == 'forest',
                         () => setModal(() => theme = 'forest')),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: _settingsChip(_tr('Dark', 'تیره'), theme == 'dark',
+                    child: _settingsChip(_l.themeDark, theme == 'dark',
                         () => setModal(() => theme = 'dark')),
                   ),
                 ],
-              ),
-              const SizedBox(height: 16),
-              Text(_tr('Scan profile', 'پروفایل اسکن'),
-                  style: GoogleFonts.inter(color: textSecond, fontSize: 12, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: kScanProfiles.map((p) {
-                  final sel = profile == p.name;
-                  return GestureDetector(
-                    onTap: () => setModal(() => profile = p.name),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: sel ? accentLime : card2Color,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: sel ? accentLime : borderColor),
-                      ),
-                      child: Text(p.label,
-                          style: GoogleFonts.inter(
-                              color: sel ? bgColor : textPrimary,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600)),
-                    ),
-                  );
-                }).toList(),
               ),
               const SizedBox(height: 20),
               SizedBox(
@@ -470,11 +439,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     setState(() {
                       _usePersian = langFa;
                       _appTheme = theme;
-                      _selectedProfile = profile;
+                      applyAppPalette(_appTheme);
+                      if (!_scanning) _statusText = L10n(langFa).readyScan;
+                      if (!_cfScanning) _cfStatus = L10n(langFa).cfReady;
                     });
                     _saveAppSettings();
                     Navigator.pop(ctx);
-                    _showSnack(_tr('Settings saved', 'تنظیمات ذخیره شد'));
+                    _showSnack(_l.settingsSaved);
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: accentLime,
@@ -540,7 +511,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _detectIsp() async {
     final isp = await detectIspName();
     if (!mounted) return;
-    setState(() { _ispName = 'اپراتور: $isp'; });
+    setState(() { _ispName = _l.ispLabel(isp); });
     _measurePing();
   }
 
@@ -590,20 +561,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             children: [
               Image.asset('assets/icons/app_icon.png', width: 72, height: 72),
               const SizedBox(height: 16),
-              Text('MidONe Scanner',
+              Text(_l.welcomeTitle,
                   style: GoogleFonts.inter(
                       color: accentLime, fontWeight: FontWeight.w800, fontSize: 20)),
               const SizedBox(height: 8),
-              // BUG 11 FIX: explicit RTL for Persian strings in welcome dialog
-              Text('به کانال تلگرام ما بپیوندید!',
-                  textDirection: TextDirection.rtl,
+              Text(_l.welcomeJoin,
+                  textDirection: _usePersian ? TextDirection.rtl : TextDirection.ltr,
+                  textAlign: TextAlign.center,
                   style: GoogleFonts.inter(
                       color: textPrimary, fontWeight: FontWeight.w700, fontSize: 15)),
               const SizedBox(height: 10),
               Text(
-                'برای دریافت آخرین بروزرسانی و آی‌پی‌های جدید به کانال تلگرام ما جوین بشید.',
+                _l.welcomeBody,
                 textAlign: TextAlign.center,
-                textDirection: TextDirection.rtl,
+                textDirection: _usePersian ? TextDirection.rtl : TextDirection.ltr,
                 style: GoogleFonts.inter(color: textSecond, fontSize: 13, height: 1.5),
               ),
               const SizedBox(height: 20),
@@ -630,8 +601,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       Image.asset('assets/icons/telegram_icon.png', width: 20, height: 20),
                       const SizedBox(width: 8),
                       // BUG 11 FIX: RTL for mixed Persian/Latin button text
-                      Text('جوین به @mmdrlx',
-                          textDirection: TextDirection.rtl,
+                      Text(_l.joinChannel,
+                          textDirection: _usePersian ? TextDirection.rtl : TextDirection.ltr,
                           style: GoogleFonts.inter(
                               fontWeight: FontWeight.w800, fontSize: 14)),
                     ],
@@ -642,8 +613,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
                 // BUG 11 FIX: RTL for Persian 'بعداً'
-                child: Text('بعداً',
-                    textDirection: TextDirection.rtl,
+                child: Text(_l.later,
+                    textDirection: _usePersian ? TextDirection.rtl : TextDirection.ltr,
                     style: GoogleFonts.inter(color: textSecond, fontSize: 13)),
               ),
             ],
@@ -668,7 +639,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         setState(() {
           _scanning = true;
           _cancelled = false;
-          _statusText = _tr('Scanning ${_importedIps.length} imported IPs...', 'اسکن ${_importedIps.length} IP ایمپورت‌شده...');
+          _statusText = 'Scanning ${_importedIps.length} imported IPs...';
         });
         _runScan(
           List<String>.from(_importedIps),
@@ -696,7 +667,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         _scanning = true;
         _cancelled = false;
-        _statusText = _tr('Sampling IPs from ${activeCidrs.length} range(s)...', 'نمونه‌برداری از ${activeCidrs.length} رنج...');
+        _statusText = 'Sampling IPs from ${activeCidrs.length} range(s)...';
       });
 
       try {
@@ -708,18 +679,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
 
         if (sampledIps.isEmpty) {
-          if (mounted) setState(() { _scanning = false; _statusText = _tr('All IPs already scanned.', 'همه IP‌ها قبلاً اسکن شدن.'); });
-          _showSnack(_tr('No new IPs. Go to History → Reset to start fresh.', 'IP جدیدی نیست. تاریخچه → ریست'));
+          if (mounted) setState(() { _scanning = false; _statusText = 'All IPs already scanned.'; });
+          _showSnack('No new IPs. Go to History → Reset to start fresh.');
           return;
         }
         if (_cancelled) {
-          if (mounted) setState(() { _scanning = false; _statusText = _tr('Cancelled.', 'لغو شد.'); });
+          if (mounted) setState(() { _scanning = false; _statusText = 'Cancelled.'; });
           return;
         }
         _runFastRangeScan(sampledIps);
       } catch (e) {
-        if (mounted) setState(() { _scanning = false; _statusText = _tr('Error: $e', 'خطا: $e'); });
-        _showSnack(_tr('Error: $e', 'خطا: $e'));
+        if (mounted) setState(() { _scanning = false; _statusText = 'Error: $e'; });
+        _showSnack('Error: $e');
       }
       return;
     }
@@ -727,9 +698,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // ── CDN mode ─────────────────────────────────────────────────────────────
     // FIX: Support CIDR input (e.g. 104.16.0.0/24) — expand to individual IPs
     final ips = _expandCidrOrIps(_ipController.text);
-    if (ips.isEmpty) { _showSnack(_tr('No valid IPs found! Check your input.', 'IP معتبری پیدا نشد! ورودی رو چک کن.')); return; }
+    if (ips.isEmpty) { _showSnack('No valid IPs found! Check your input.'); return; }
     // Safety limit to prevent memory issues with huge CIDRs
-    if (ips.length > 50000) { _showSnack(_tr('Too many IPs (${ips.length}). Max 50,000.', 'تعداد IP خیلی زیاده (${ips.length}). حداکثر ۵۰٬۰۰۰.')); return; }
+    if (ips.length > 50000) { _showSnack('Too many IPs (${ips.length}). Max 50,000.'); return; }
     if (_cdnSubMode == CdnSubMode.deep) {
       _showSniPickerDialog(ips);
       return;
@@ -778,9 +749,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Fast range scan — TCP-only probe (like cdn-ip-finder)
   // Processes 200 IPs at a time with 3s between batches.
   Future<void> _runFastRangeScan(List<String> ips) async {
-    const batchSize  = 200;
-    const batchDelay = Duration(seconds: 3);
-    const timeoutMs  = 4000;
+    const batchSize  = 400;
+    const batchDelay = Duration.zero;
+    const timeoutMs  = 2000;
 
     _batchTimer?.cancel();
     _pendingResults.clear();
@@ -805,7 +776,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _cachedDisplay  = [];
       _advancedFilter = 'alive';
       _coloFilter     = '';
-      _statusText = _tr('Fast scan: ${ips.length} IPs…', 'اسکن سریع: ${ips.length} IP...');
+      _statusText = _l.fastRangeStatus(ips.length);
     });
 
     _startBatchTimer();
@@ -865,7 +836,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _done = done;
         final pct = (_done / _total * 100).round();
         setState(() {
-          _statusText = _tr('Fast scan $pct% — batch ${batchStart ~/ batchSize + 1}/${(ips.length / batchSize).ceil()}', 'اسکن سریع $pct% — دسته ${batchStart ~/ batchSize + 1}/${(ips.length / batchSize).ceil()}');
+          _statusText = 'Fast scan $pct% — batch ${batchStart ~/ batchSize + 1}/${(ips.length / batchSize).ceil()}';
         });
 
         if (!_cancelled && batchStart + batchSize < ips.length) {
@@ -874,8 +845,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     } catch (e) {
       if (mounted) {
-        setState(() { _statusText = _tr('Scan error: $e', 'خطای اسکن: $e'); });
-        _showSnack(_tr('Scan error: $e', 'خطای اسکن: $e'));
+        setState(() { _statusText = 'Scan error: $e'; });
+        _showSnack('Scan error: $e');
       }
     } finally {
       _stopBatchTimer();
@@ -889,9 +860,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     if (mounted && !_cancelled) {
       setState(() {
-        _statusText = _tr('Done! ${_results.where((r) => r.isAlive).length} alive from ${ips.length}', 'تمام! ${_results.where((r) => r.isAlive).length} زنده از ${ips.length}');
+        _statusText = 'Done! ${_results.where((r) => r.isAlive).length} alive from ${ips.length}';
       });
-      _showSnack(_tr('✓ Done! ${_results.where((r) => r.isAlive).length} alive IPs found', '✓ تمام! ${_results.where((r) => r.isAlive).length} IP زنده پیدا شد'));
+      _showSnack('\u2713 Done! ${_results.where((r) => r.isAlive).length} alive IPs found');
       if (_results.isNotEmpty) {
         Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) setState(() => _tab = 1);
@@ -933,10 +904,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     _startBatchTimer();
 
-    final profile = getProfile(_selectedProfile);
     final concurrency = (Platform.isWindows || Platform.isLinux || Platform.isMacOS)
         ? 32
-        : profile.concurrency;
+        : 8;
 
     void onPrefilterDone(int liveCount, int totalCount) {
       if (!mounted) return;
@@ -969,30 +939,50 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
 
-    final Future<List<ScanResult>> scanFuture = isRangeScan
-        ? runScanningEngine(
-            ips,
-            mode: ScanMode.normal,
-            concurrency: concurrency,
-            deepSnis: deepSnis,
-            normalSniOverride:
-                rangeCfMode ? 'speed.cloudflare.com' : null,
-            isCfScan: rangeCfMode,
-            tlsRepeats: _cdnTestMultiplier,
-            onPrefilterDone: onPrefilterDone,
-            onProgress: onProgress,
-            isCancelled: () => _cancelled,
-          )
-        : runCdnScanEngine(
-            ips,
-            mode: _cdnSubMode == CdnSubMode.deep ? ScanMode.deep : ScanMode.normal,
-            concurrency: concurrency,
-            deepSnis: deepSnis,
-            tlsRepeats: _cdnTestMultiplier,
-            onPrefilterDone: onPrefilterDone,
-            onProgress: onProgress,
-            isCancelled: () => _cancelled,
-          );
+    final Future<List<ScanResult>> scanFuture;
+    if (isRangeScan) {
+      scanFuture = runScanningEngine(
+        ips,
+        mode: ScanMode.normal,
+        concurrency: concurrency,
+        deepSnis: deepSnis,
+        normalSniOverride: rangeCfMode ? 'speed.cloudflare.com' : null,
+        isCfScan: rangeCfMode,
+        tlsRepeats: _cdnTestMultiplier,
+        onPrefilterDone: onPrefilterDone,
+        onProgress: onProgress,
+        isCancelled: () => _cancelled,
+      );
+    } else if (_cdnSubMode == CdnSubMode.deep) {
+      scanFuture = runCdnScanEngine(
+        ips,
+        mode: ScanMode.deep,
+        concurrency: concurrency,
+        deepSnis: deepSnis,
+        tlsRepeats: _cdnTestMultiplier,
+        onPrefilterDone: onPrefilterDone,
+        onProgress: onProgress,
+        isCancelled: () => _cancelled,
+      );
+    } else if (_cdnNormalVariant == CdnNormalVariant.fast) {
+      scanFuture = runCdnFastScanEngine(
+        ips,
+        onPrefilterDone: onPrefilterDone,
+        onProgress: onProgress,
+        isCancelled: () => _cancelled,
+      );
+    } else {
+      scanFuture = runCdnScanEngine(
+        ips,
+        mode: ScanMode.normal,
+        concurrency: concurrency,
+        deepSnis: deepSnis,
+        tlsRepeats: _cdnTestMultiplier,
+        onPrefilterDone: onPrefilterDone,
+        onProgress: onProgress,
+        isCancelled: () => _cancelled,
+      );
+    }
 
     scanFuture.then((results) {
       if (!mounted) return;
@@ -1076,7 +1066,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _showSniPickerDialog(List<String> ips) {
     final localSelected = Set<String>.from(_selectedSnis);
-    final allSnis = List<String>.from(kDeepSniPresets);
 
     showModalBottomSheet(
       context: context,
@@ -1086,17 +1075,74 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) {
+          final customSnis = localSelected
+              .where((s) => !kDeepSniPresetsUi.contains(s))
+              .toList();
+
+          Widget sniTile(String sni, String? tag) {
+      final checked = localSelected.contains(sni);
+      return GestureDetector(
+        onTap: () {
+          setModalState(() {
+            if (checked) {
+              if (localSelected.length > 1) localSelected.remove(sni);
+            } else {
+              localSelected.add(sni);
+            }
+          });
+        },
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: checked ? accentLime.withOpacity(0.08) : iconBg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: checked ? accentLime.withOpacity(0.4) : borderColor),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                checked ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
+                color: checked ? accentLime : textSecond,
+                size: 20,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(sni,
+                    style: GoogleFonts.robotoMono(
+                        color: checked ? textPrimary : textSecond,
+                        fontSize: 13,
+                        fontWeight: checked ? FontWeight.w600 : FontWeight.normal)),
+              ),
+              if (tag != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                      color: accentLime.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(6)),
+                  child: Text(tag,
+                      style: GoogleFonts.inter(
+                          color: accentLime, fontSize: 9, fontWeight: FontWeight.w700)),
+                ),
+            ],
+          ),
+        ),
+      );
+          }
+
           return Padding(
             padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
             child: Container(
-              constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.85),
+              constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.75),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
                     margin: const EdgeInsets.only(top: 12, bottom: 4),
-                    width: 40, height: 4,
-                    decoration: BoxDecoration(color: borderColor, borderRadius: BorderRadius.circular(2)),
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                        color: borderColor, borderRadius: BorderRadius.circular(2)),
                   ),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
@@ -1104,107 +1150,94 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       children: [
                         const Icon(Icons.tune_rounded, color: accentLime, size: 20),
                         const SizedBox(width: 8),
-                        Text(_tr('Deep Scan — SNI Selection', 'اسکن عمیق — انتخاب SNI'),
-                            style: GoogleFonts.inter(color: accentLime, fontWeight: FontWeight.w700, fontSize: 16)),
-                        const Spacer(),
-                        Text(_tr('${localSelected.length} selected', '${localSelected.length} انتخاب شده'),
+                        Expanded(
+                          child: Text(_l.deepSniTitle,
+                              style: GoogleFonts.inter(
+                                  color: accentLime,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 16)),
+                        ),
+                        Text(_l.selectedCount(localSelected.length),
                             style: GoogleFonts.inter(color: textSecond, fontSize: 12)),
                       ],
                     ),
                   ),
                   const Divider(color: borderColor, height: 1),
                   Flexible(
-                    child: ListView.builder(
-                      shrinkWrap: true,
+                    child: ListView(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      itemCount: allSnis.length,
-                      itemBuilder: (ctx, i) {
-                        final sni = allSnis[i];
-                        final checked = localSelected.contains(sni);
-                        return GestureDetector(
-                          onTap: () {
-                            setModalState(() {
-                              if (checked) {
-                                if (localSelected.length > 1) localSelected.remove(sni);
-                              } else {
-                                localSelected.add(sni);
-                              }
-                            });
-                          },
-                          child: Container(
-                            margin: const EdgeInsets.only(bottom: 6),
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                            decoration: BoxDecoration(
-                              color: checked ? accentLime.withOpacity(0.08) : iconBg,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: checked ? accentLime.withOpacity(0.4) : borderColor),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  checked ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
-                                  color: checked ? accentLime : textSecond, size: 20,
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(sni,
-                                      style: GoogleFonts.robotoMono(
-                                          color: checked ? textPrimary : textSecond,
-                                          fontSize: 13,
-                                          fontWeight: checked ? FontWeight.w600 : FontWeight.normal)),
-                                ),
-                                if (sni == 'www.google.com')
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                        color: accentLime.withOpacity(0.15),
-                                        borderRadius: BorderRadius.circular(6)),
-                                    child: Text('ShirKhorshid',
-                                        style: GoogleFonts.inter(color: accentLime, fontSize: 9, fontWeight: FontWeight.w700)),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Row(
                       children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _customSniController,
-                            style: GoogleFonts.robotoMono(color: textPrimary, fontSize: 13),
-                            decoration: InputDecoration(
-                              hintText: _tr('Add custom SNI...', 'SNI دلخواه اضافه کن...'),
-                              hintStyle: GoogleFonts.robotoMono(color: textSecond, fontSize: 13),
-                              filled: true, fillColor: iconBg,
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: borderColor)),
-                              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: borderColor)),
-                              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: accentLime)),
+                        Text(_l.sniPresets,
+                            style: GoogleFonts.inter(
+                                color: textSecond,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1.1)),
+                        const SizedBox(height: 8),
+                        sniTile('www.google.com', _l.sniShirTag),
+                        sniTile('speed.cloudflare.com', _l.sniCfTag),
+                        ...customSnis.map((s) => sniTile(s, null)),
+                        const SizedBox(height: 12),
+                        Text(_l.sniCustom,
+                            style: GoogleFonts.inter(
+                                color: textSecond,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1.1)),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _customSniController,
+                                style: GoogleFonts.robotoMono(
+                                    color: textPrimary, fontSize: 13),
+                                decoration: InputDecoration(
+                                  hintText: _l.sniCustomHint,
+                                  hintStyle:
+                                      GoogleFonts.robotoMono(color: textSecond, fontSize: 13),
+                                  filled: true,
+                                  fillColor: iconBg,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 10),
+                                  border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      borderSide: const BorderSide(color: borderColor)),
+                                  enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      borderSide: const BorderSide(color: borderColor)),
+                                  focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      borderSide: const BorderSide(color: accentLime)),
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        GestureDetector(
-                          onTap: () {
-                            final custom = _customSniController.text.trim();
-                            if (custom.isNotEmpty && !allSnis.contains(custom)) {
-                              setModalState(() {
-                                allSnis.add(custom);
-                                localSelected.add(custom);
-                                _customSniController.clear();
-                              });
-                            }
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                            decoration: BoxDecoration(color: accentLime, borderRadius: BorderRadius.circular(12)),
-                            child: Text(_tr('Add', 'افزودن'), style: GoogleFonts.inter(color: bgColor, fontWeight: FontWeight.w700, fontSize: 13)),
-                          ),
+                            const SizedBox(width: 8),
+                            GestureDetector(
+                              onTap: () {
+                                final custom = _customSniController.text.trim();
+                                if (custom.isNotEmpty &&
+                                    !localSelected.contains(custom)) {
+                                  setModalState(() {
+                                    localSelected.add(custom);
+                                    _customSniController.clear();
+                                  });
+                                }
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 11),
+                                decoration: BoxDecoration(
+                                    color: accentLime,
+                                    borderRadius: BorderRadius.circular(12)),
+                                child: Text(_l.sniAdd,
+                                    style: GoogleFonts.inter(
+                                        color: bgColor,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 13)),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -1212,20 +1245,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
                     child: SizedBox(
-                      width: double.infinity, height: 52,
+                      width: double.infinity,
+                      height: 52,
                       child: ElevatedButton(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          setState(() { _selectedSnis = Set<String>.from(localSelected); });
-                          _runScan(ips, localSelected.toList());
-                        },
+                        onPressed: localSelected.isEmpty
+                            ? null
+                            : () {
+                                Navigator.pop(ctx);
+                                setState(() {
+                                  _selectedSnis = Set<String>.from(localSelected);
+                                });
+                                _runScan(ips, localSelected.toList());
+                              },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: accentLime, foregroundColor: bgColor,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          backgroundColor: accentLime,
+                          foregroundColor: bgColor,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14)),
                           elevation: 0,
                         ),
-                        child: Text(_tr('Start Deep Scan (${localSelected.length} SNIs)', 'شروع اسکن عمیق (${localSelected.length} SNI)'),
-                            style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 15)),
+                        child: Text(
+                            '${_l.startDeep} (${localSelected.length})',
+                            style: GoogleFonts.inter(
+                                fontWeight: FontWeight.w800, fontSize: 15)),
                       ),
                     ),
                   ),
@@ -1248,13 +1290,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _scanning = false;
       _prefiltering = false;
       _displayDirty = true;
-      _statusText = _tr('Stopped (${_results.length} results so far)', 'متوقف شد (${_results.length} نتیجه)');
+      _statusText = _l.stoppedSoFar(_results.length);
     });
   }
 
   // p44: pause scan
   void _pauseScan() {
-    setState(() { _paused = true; _statusText = _tr('Paused...', 'مکث...'); });
+    setState(() { _paused = true; _statusText = _l.pauseScan; });
   }
 
   // p44: resume scan
@@ -1265,7 +1307,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!_paused) return;
     setState(() {
       _paused = false;
-      _statusText = _tr('Resumed...', 'ادامه...');
+      _statusText = 'Resumed...';
     });
   }
 
@@ -1347,21 +1389,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _copyTop5() {
     final top5 = _displayResults.where((r) => r.isAlive || r.tier == IpTier.usable || r.tier == IpTier.weak).take(5).toList();
-    if (top5.isEmpty) { _showSnack(_tr('No results!', 'نتیجه‌ای نیست!')); return; }
+    if (top5.isEmpty) { _showSnack('No results!'); return; }
     Clipboard.setData(ClipboardData(text: top5.map((r) => r.ip).join('\n')));
-    _showSnack(_tr('✓ Top 5 copied!', '✓ ۵ تای اول کپی شد!'));
+    _showSnack('✓ Top 5 copied!');
   }
 
   void _copyAll() {
     final list = _displayResults.where((r) => r.isAlive).toList();
-    if (list.isEmpty) { _showSnack(_tr('No alive results!', 'هیچ IP زنده‌ای نیست!')); return; }
+    if (list.isEmpty) { _showSnack('No alive results!'); return; }
     Clipboard.setData(ClipboardData(text: list.map((r) => r.ip).join('\n')));
-    _showSnack(_tr('✓ All ${list.length} IPs copied!', '✓ ${list.length} IP کپی شد!'));
+    _showSnack('✓ All ${list.length} IPs copied!');
   }
 
   // p40: export JSON
   Future<void> _exportJson() async {
-    if (_results.isEmpty) { _showSnack(_tr('No results!', 'نتیجه‌ای نیست!')); return; }
+    if (_results.isEmpty) { _showSnack('No results!'); return; }
     try {
       final dir = Platform.isAndroid ? (await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory()) : await getApplicationDocumentsDirectory();
       final folder = Directory('${dir.path}/MidONeScanner');
@@ -1381,12 +1423,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         'timestamp': DateTime.now().toIso8601String(),
         'results': data,
       }));
-      _showSnack(_tr('✓ JSON saved: scan_\$ts.json', '✓ JSON ذخیره شد: scan_\$ts.json'));
-    } catch (e) { _showSnack(_tr('Export error: $e', 'خطای خروجی: $e')); }
+      _showSnack('✓ JSON saved: scan_$ts.json');
+    } catch (e) { _showSnack('Export error: $e'); }
   }
 
   Future<void> _saveResults() async {
-    if (_results.isEmpty) { _showSnack(_tr('No results!', 'نتیجه‌ای نیست!')); return; }
+    if (_results.isEmpty) { _showSnack('No results!'); return; }
     try {
       final dir = Platform.isAndroid ? (await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory()) : await getApplicationDocumentsDirectory();
       final folder = Directory('${dir.path}/MidONeScanner');
@@ -1409,16 +1451,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         buf.writeln('${r.ip.padRight(17)}${r.grade.padRight(4)}${r.latencyMs.toStringAsFixed(1).padLeft(8)} ms  Loss:${r.loss}%  Rel:${(r.reliability * 100).round()}%${r.isAlive ? '' : ' [DEAD]'}');
       }
       await file.writeAsString(buf.toString());
-      _showSnack(_tr('✓ Saved: scan_\$ts.txt', '✓ ذخیره شد: scan_\$ts.txt'));
-    } catch (e) { _showSnack(_tr('Save error: $e', 'خطای ذخیره: $e')); }
+      _showSnack('✓ Saved: scan_$ts.txt');
+    } catch (e) { _showSnack('Save error: $e'); }
   }
 
   // p41: retest all failed IPs
   // BUG 13 FIX: run retests in concurrent batches instead of sequentially
   Future<void> _retestFailed() async {
     final failed = _results.where((r) => !r.isAlive).toList();
-    if (failed.isEmpty) { _showSnack(_tr('No failed IPs to retest!', 'هیچ IP ناموفقی برای اسکن مجدد نیست!')); return; }
-    _showSnack(_tr('Retesting ${failed.length} failed IPs...', 'اسکن مجدد ${failed.length} IP ناموفق...'));
+    if (failed.isEmpty) { _showSnack('No failed IPs to retest!'); return; }
+    _showSnack('Retesting ${failed.length} failed IPs...');
 
     const batchSize = 8;
     for (int i = 0; i < failed.length; i += batchSize) {
@@ -1434,7 +1476,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _displayDirty = true;
       });
     }
-    if (mounted) _showSnack(_tr('✓ Retest done!', '✓ اسکن مجدد تمام شد!'));
+    if (mounted) _showSnack('✓ Retest done!');
   }
 
   void _showSnack(String msg) {
@@ -1448,13 +1490,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     ));
   }
 
-  Color get _scaffoldBg =>
-      _appTheme == 'dark' ? const Color(0xFF050808) : bgColor;
-
   @override
   Widget build(BuildContext context) {
+    applyAppPalette(_appTheme);
     return Scaffold(
-      backgroundColor: _scaffoldBg,
+      backgroundColor: bgColor,
       body: SafeArea(
         child: Stack(
           children: [
@@ -1499,10 +1539,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   if (_titleTapCount >= 5) {
                     _titleTapCount = 0;
                     setState(() { _devMode = !_devMode; });
-                    _showSnack(_devMode ? _tr('🔧 Dev Mode ON', '🔧 حالت توسعه روشن') : _tr('🔧 Dev Mode OFF', '🔧 حالت توسعه خاموش'));
+                    _showSnack(_devMode ? '🔧 ${_l.devModeOn}' : '🔧 ${_l.devModeOff}');
                   }
                 },
-                child: Text('MidONe Scanner',
+                child: Text(_l.appTitle,
+                    textDirection: _usePersian ? TextDirection.rtl : TextDirection.ltr,
                     style: GoogleFonts.inter(
                         color: accentLime, fontWeight: FontWeight.w800,
                         fontSize: 18, letterSpacing: -0.5)),
@@ -1521,8 +1562,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           const Spacer(),
           IconButton(
-            icon: const Icon(Icons.settings_rounded, color: textSecond, size: 22),
-            tooltip: _tr('Settings', 'تنظیمات'),
+            icon: Icon(Icons.settings_rounded, color: textSecond, size: 22),
+            tooltip: _l.settings,
             onPressed: _showSettingsSheet,
           ),
           GestureDetector(
@@ -1587,18 +1628,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(_tr('SCAN MODE', 'حالت اسکن'),
+          Text(_l.scanMode,
               style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(child: _tabBtn(ScanTab.cdn, 'CDN', _tr('TLS · BW', 'TLS · پهنای‌باند'))),
+              Expanded(child: _tabBtn(ScanTab.cdn, _l.tabCdn, _l.tabSubCdn)),
               const SizedBox(width: 6),
-              Expanded(child: _tabBtn(ScanTab.cloudflare, 'CF', 'کلودفلر')),
+              Expanded(child: _tabBtn(ScanTab.cloudflare, _l.tabCf, _tr('Xray CF', 'کلودفلر Xray'))),
               const SizedBox(width: 6),
-              Expanded(child: _tabBtn(ScanTab.range, 'Range', 'CIDR')),
+              Expanded(child: _tabBtn(ScanTab.range, _l.tabRange, _l.tabSubRange)),
               const SizedBox(width: 6),
-              Expanded(child: _tabBtn(ScanTab.dns, 'DNS', _tr('Best DNS', 'بهترین DNS'))),
+              Expanded(child: _tabBtn(ScanTab.dns, _l.tabDns, _l.tabSubDns)),
             ],
           ),
         ],
@@ -1654,18 +1695,32 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(_tr('CDN MODE', 'حالت CDN'),
+          Text(_l.cdnMode,
               style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
           const SizedBox(height: 10),
           Row(
             children: [
-              Expanded(child: _cdnSubBtn(CdnSubMode.normal, _tr('Normal', 'معمولی'), 'SNI: google.com')),
+              Expanded(child: _cdnSubBtn(CdnSubMode.normal, _l.cdnNormal, _l.cdnNormalSub)),
               const SizedBox(width: 8),
-              Expanded(child: _cdnSubBtn(CdnSubMode.deep, _tr('Deep Scan', 'اسکن عمیق'), _tr('Multi-SNI probes', 'پروب چند SNI'))),
+              Expanded(child: _cdnSubBtn(CdnSubMode.deep, _l.cdnDeep, _l.cdnDeepSub)),
             ],
           ),
+          if (_cdnSubMode == CdnSubMode.normal) ...[
+            const SizedBox(height: 12),
+            Text(_l.cdnNormalType,
+                style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 1.2)),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(child: _cdnNormalVariantBtn(CdnNormalVariant.fast, _l.cdnFast, _l.cdnFastSub)),
+                const SizedBox(width: 8),
+                Expanded(child: _cdnNormalVariantBtn(CdnNormalVariant.standard, _l.cdnStandard, _l.cdnStandardSub)),
+              ],
+            ),
+          ],
+          if (_cdnSubMode == CdnSubMode.normal && _cdnNormalVariant == CdnNormalVariant.standard) ...[
           const SizedBox(height: 14),
-          Text(_tr('TEST MULTIPLIER (TLS tries, loss %)', 'ضریب تست (تلاش TLS، درصد افت)'),
+          Text(_l.testMultiplier,
               style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 1.2)),
           const SizedBox(height: 6),
           Row(
@@ -1699,7 +1754,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               );
             }),
           ),
+          ],
         ],
+      ),
+    );
+  }
+
+  Widget _cdnNormalVariantBtn(CdnNormalVariant v, String title, String sub) {
+    final sel = _cdnNormalVariant == v;
+    return GestureDetector(
+      onTap: () => setState(() => _cdnNormalVariant = v),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 9),
+        decoration: BoxDecoration(
+          color: sel ? accentLime.withOpacity(0.12) : iconBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: sel ? accentLime : borderColor, width: sel ? 1.5 : 1),
+        ),
+        child: Column(
+          children: [
+            Text(title, style: GoogleFonts.inter(color: sel ? accentLime : textPrimary, fontWeight: FontWeight.w700, fontSize: 12)),
+            Text(sub, style: GoogleFonts.inter(color: textSecond, fontSize: 9), textAlign: TextAlign.center),
+          ],
+        ),
       ),
     );
   }
@@ -1739,10 +1816,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         children: [
           Row(
             children: [
-              Text(_tr('IP ADDRESSES', 'آدرس‌های IP'),
+              Text(_l.ipAddresses,
                   style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
               const Spacer(),
-              _miniBtn(_tr('Paste', 'پیست'), () async {
+              _miniBtn(_l.paste, () async {
                 final data = await Clipboard.getData('text/plain');
                 if (data?.text != null) {
                   final cur = _ipController.text;
@@ -1750,7 +1827,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 }
               }),
               const SizedBox(width: 8),
-              _miniBtn(_tr('Clear', 'پاک کردن'), () => _ipController.clear(), isDestructive: true),
+              _miniBtn(_l.clear, () => _ipController.clear(), isDestructive: true),
             ],
           ),
           const SizedBox(height: 10),
@@ -1759,7 +1836,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             maxLines: 6,
             style: GoogleFonts.robotoMono(color: textPrimary, fontSize: 13),
             decoration: InputDecoration(
-              hintText: '1.1.1.1\n8.8.8.8\n104.16.0.0\n...',
+              hintText: _l.ipHint,
               hintStyle: GoogleFonts.robotoMono(color: textSecond, fontSize: 12),
               filled: true, fillColor: card2Color,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
@@ -1783,10 +1860,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           // ── Header ──────────────────────────────────────────────────────
           Row(
             children: [
-              Text(_tr('CF IP ADDRESSES', 'آدرس‌های IP کلودفلر'),
+              Text('CF IP ADDRESSES',
                   style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
               const Spacer(),
-              _miniBtn(_tr('Paste', 'پیست'), () async {
+              _miniBtn('Paste', () async {
                 final data = await Clipboard.getData('text/plain');
                 if (data?.text != null) {
                   final cur = _ipController.text;
@@ -1794,7 +1871,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 }
               }),
               const SizedBox(width: 8),
-              _miniBtn(_tr('Clear', 'پاک کردن'), () => _ipController.clear(), isDestructive: true),
+              _miniBtn('Clear', () => _ipController.clear(), isDestructive: true),
             ],
           ),
           const SizedBox(height: 10),
@@ -1804,10 +1881,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             spacing: 8,
             runSpacing: 8,
             children: [
-              SizedBox(width: (MediaQuery.of(context).size.width - 64) / 2 - 4, child: _cfModeBtn(0, _tr('CF Ranges', 'رنج‌های CF'), _tr('Random CF pool', 'رنج تصادفی CF'))),
-              SizedBox(width: (MediaQuery.of(context).size.width - 64) / 2 - 4, child: _cfModeBtn(1, _tr('Manual IP', 'IP دستی'), _tr('One IP per line', 'هر خط یک IP'))),
-              SizedBox(width: (MediaQuery.of(context).size.width - 64) / 2 - 4, child: _cfModeBtn(2, _tr('CIDR Range', 'رنج CIDR'), 'e.g. 104.16.0.0/24')),
-              SizedBox(width: (MediaQuery.of(context).size.width - 64) / 2 - 4, child: _cfModeBtn(3, _tr('Import', 'ایمپورت'), _tr('Load .txt file', 'بارگذاری فایل .txt'))),
+              SizedBox(width: (MediaQuery.of(context).size.width - 64) / 2 - 4, child: _cfModeBtn(0, 'CF Ranges', 'Random CF pool')),
+              SizedBox(width: (MediaQuery.of(context).size.width - 64) / 2 - 4, child: _cfModeBtn(1, 'Manual IP', 'One IP per line')),
+              SizedBox(width: (MediaQuery.of(context).size.width - 64) / 2 - 4, child: _cfModeBtn(2, 'CIDR Range', 'e.g. 104.16.0.0/24')),
+              SizedBox(width: (MediaQuery.of(context).size.width - 64) / 2 - 4, child: _cfModeBtn(3, 'Import', 'Load .txt file')),
             ],
           ),
           const SizedBox(height: 12),
@@ -1822,7 +1899,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
               child: Row(
                 children: [
-                  Text(_tr('${_cfImportedIps.length} IPs imported', '${_cfImportedIps.length} IP ایمپورت شد'),
+                  Text('${_cfImportedIps.length} IPs imported',
                       style: GoogleFonts.inter(color: const Color(0xFF00E5FF), fontSize: 12, fontWeight: FontWeight.w700)),
                   const Spacer(),
                   GestureDetector(
@@ -1890,7 +1967,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             const SizedBox(height: 12),
 
             // Sample count picker
-            Text(_tr('HOW MANY IPs TO SCAN', 'چند IP اسکن بشه'),
+            Text('HOW MANY IPs TO SCAN',
                 style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 1.2)),
             const SizedBox(height: 6),
             SingleChildScrollView(
@@ -1931,7 +2008,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ],
 
           // ── Timeout picker ───────────────────────────────────────────────
-          Text(_tr('TIMEOUT PER IP', 'تایم‌اوت هر IP'),
+          Text('TIMEOUT PER IP',
               style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 1.2)),
           const SizedBox(height: 6),
           Row(
@@ -1967,7 +2044,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           const SizedBox(height: 14),
 
           // ── Tries per IP picker (SENPAI-SYNC) ───────────────────────────
-          Text(_tr('TRIES PER IP', 'تعداد تلاش برای هر IP'),
+          Text('TRIES PER IP',
               style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 1.2)),
           const SizedBox(height: 6),
           Row(
@@ -2000,7 +2077,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           const SizedBox(height: 14),
 
           // ── Sort mode picker (SENPAI-SYNC) ───────────────────────────────
-          Text(_tr('SORT BY', 'مرتب‌سازی بر اساس'),
+          Text('SORT BY',
               style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 1.2)),
           const SizedBox(height: 6),
           SingleChildScrollView(
@@ -2024,7 +2101,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             onTap: () => setState(() => _cfConfigExpanded = !_cfConfigExpanded),
             child: Row(
               children: [
-                Text(_tr('CONFIG (VLESS/TROJAN) — optional', 'کانفیگ (VLESS/TROJAN) — اختیاری'),
+                Text('CONFIG (VLESS/TROJAN) — optional',
                     style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 1.2)),
                 const Spacer(),
                 if (_cfParsedConfig != null)
@@ -2036,7 +2113,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       borderRadius: BorderRadius.circular(5),
                       border: Border.all(color: const Color(0xFF69FF47).withOpacity(0.4)),
                     ),
-                    child: Text(_tr('Config OK', 'کانفیگ تأییدشد'), style: GoogleFonts.inter(color: const Color(0xFF69FF47), fontSize: 10, fontWeight: FontWeight.w700)),
+                    child: Text('Config OK', style: GoogleFonts.inter(color: const Color(0xFF69FF47), fontSize: 10, fontWeight: FontWeight.w700)),
                   ),
                 Icon(_cfConfigExpanded ? Icons.expand_less : Icons.expand_more,
                     color: textSecond, size: 18),
@@ -2111,7 +2188,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   OutlinedButton.icon(
                     onPressed: _importCfIpsFromFile,
                     icon: const Icon(Icons.upload_file_rounded, size: 16, color: accentLime),
-                    label: Text(_tr('Import IPs', 'ایمپورت IP'),
+                    label: Text('Import IPs',
                         style: GoogleFonts.inter(color: accentLime, fontSize: 12, fontWeight: FontWeight.w600)),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: accentLime),
@@ -2160,7 +2237,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               // Top-N picker for phase 2
               Row(
                 children: [
-                  Text(_tr('Xray test top N IPs:', 'تست Xray روی N IP برتر:'),
+                  Text('Xray test top N IPs:',
                       style: GoogleFonts.inter(color: textSecond, fontSize: 12)),
                   const SizedBox(width: 8),
                   ...[10, 20, 50, 100].map((n) {
@@ -2198,10 +2275,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               children: [
                 Text(
                   _cfPhase2Total > 0
-                      ? _tr(_tr('Phase 2: Config validation...', 'مرحله ۲: اعتبارسنجی کانفیگ...'), 'مرحله ۲: اعتبارسنجی کانفیگ...')
+                      ? 'Phase 2: Config validation...'
                       : _cfPhase1Done
-                          ? _tr('Phase 1 done — ${_cfPhase1Results.where((r) => r.isEdge).length} CF edges', 'مرحله ۱ تمام — ${_cfPhase1Results.where((r) => r.isEdge).length} لبه CF')
-                          : _tr(_tr('Phase 1: CF edge detection...', 'مرحله ۱: تشخیص لبه CF...'), 'مرحله ۱: تشخیص لبه CF...'),
+                          ? 'Phase 1 done — ${_cfPhase1Results.where((r) => r.isEdge).length} CF edges'
+                          : 'Phase 1: CF edge detection...',
                   style: GoogleFonts.inter(
                       color: _cfPhase2Total > 0
                           ? const Color(0xFFFFD060)
@@ -2233,17 +2310,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           if (_cfPhase2Results.isNotEmpty) ...[
             Row(
               children: [
-                Text(_tr('${_cfPhase2Results.where((r) => r.success).length} Config OK', '${_cfPhase2Results.where((r) => r.success).length} کانفیگ تأییدشده'),
+                Text('${_cfPhase2Results.where((r) => r.success).length} Config OK',
                     style: GoogleFonts.inter(color: const Color(0xFF69FF47), fontSize: 12, fontWeight: FontWeight.w700)),
                 const SizedBox(width: 10),
-                Text(_tr('${_cfPhase2Results.length} tested', '${_cfPhase2Results.length} تست‌شده'),
+                Text('${_cfPhase2Results.length} tested',
                     style: GoogleFonts.inter(color: textSecond, fontSize: 12)),
                 const Spacer(),
-                _miniBtn(_tr('Copy OK IPs', 'کپی IP‌های تأییدشده'), () {
+                _miniBtn('Copy OK IPs', () {
                   final ips = _cfPhase2Results.where((r) => r.success).map((r) => r.ip).join('\n');
-                  if (ips.isEmpty) { _showSnack(_tr('No working IPs!', 'هیچ IP کارآمدی نیست!')); return; }
+                  if (ips.isEmpty) { _showSnack('No working IPs!'); return; }
                   Clipboard.setData(ClipboardData(text: ips));
-                  _showSnack(_tr('Copied ${_cfPhase2Results.where((r) => r.success).length} IPs', '${_cfPhase2Results.where((r) => r.success).length} IP کپی شد'));
+                  _showSnack('Copied ${_cfPhase2Results.where((r) => r.success).length} IPs');
                 }, isAccent: true),
               ],
             ),
@@ -2255,17 +2332,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           if (_cfPhase2Results.isEmpty && _cfPhase1Results.isNotEmpty) ...[
             Row(
               children: [
-                Text(_tr('${_cfPhase1Results.where((r) => r.isEdge).length} CF Edge', '${_cfPhase1Results.where((r) => r.isEdge).length} لبه CF'),
+                Text('${_cfPhase1Results.where((r) => r.isEdge).length} CF Edge',
                     style: GoogleFonts.inter(color: const Color(0xFF69FF47), fontSize: 12, fontWeight: FontWeight.w700)),
                 const SizedBox(width: 10),
-                Text(_tr('${_cfPhase1Results.length} total', '${_cfPhase1Results.length} کل'),
+                Text('${_cfPhase1Results.length} total',
                     style: GoogleFonts.inter(color: textSecond, fontSize: 12)),
                 const Spacer(),
-                _miniBtn(_tr('Copy Edge IPs', 'کپی IP‌های لبه'), () {
+                _miniBtn('Copy Edge IPs', () {
                   final ips = _cfPhase1Results.where((r) => r.isEdge).map((r) => r.ip).join('\n');
-                  if (ips.isEmpty) { _showSnack(_tr('No CF edge IPs!', 'هیچ IP لبه CF نیست!')); return; }
+                  if (ips.isEmpty) { _showSnack('No CF edge IPs!'); return; }
                   Clipboard.setData(ClipboardData(text: ips));
-                  _showSnack(_tr('Copied ${_cfPhase1Results.where((r) => r.isEdge).length} IPs', '${_cfPhase1Results.where((r) => r.isEdge).length} IP کپی شد'));
+                  _showSnack('Copied ${_cfPhase1Results.where((r) => r.isEdge).length} IPs');
                 }, isAccent: true),
               ],
             ),
@@ -2277,17 +2354,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           if (_cfPhase1Results.isEmpty && _cfPhase2Results.isEmpty && _cfResults.isNotEmpty) ...[
             Row(
               children: [
-                Text(_tr('${_cfResults.where((r) => r.isEdge).length} CF Edge', '${_cfResults.where((r) => r.isEdge).length} لبه CF'),
+                Text('${_cfResults.where((r) => r.isEdge).length} CF Edge',
                     style: GoogleFonts.inter(color: const Color(0xFF69FF47), fontSize: 12, fontWeight: FontWeight.w700)),
                 const SizedBox(width: 10),
-                Text(_tr('${_cfResults.length} total', '${_cfResults.length} کل'),
+                Text('${_cfResults.length} total',
                     style: GoogleFonts.inter(color: textSecond, fontSize: 12)),
                 const Spacer(),
-                _miniBtn(_tr('Copy Edge IPs', 'کپی IP‌های لبه'), () {
+                _miniBtn('Copy Edge IPs', () {
                   final edgeIps = _cfResults.where((r) => r.isEdge).map((r) => r.ip).join('\n');
-                  if (edgeIps.isEmpty) { _showSnack(_tr('No CF edge IPs!', 'هیچ IP لبه CF نیست!')); return; }
+                  if (edgeIps.isEmpty) { _showSnack('No CF edge IPs!'); return; }
                   Clipboard.setData(ClipboardData(text: edgeIps));
-                  _showSnack(_tr('Copied ${_cfResults.where((r) => r.isEdge).length} IPs', '${_cfResults.where((r) => r.isEdge).length} IP کپی شد'));
+                  _showSnack('Copied ${_cfResults.where((r) => r.isEdge).length} IPs');
                 }, isAccent: true),
               ],
             ),
@@ -2349,7 +2426,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _validateCfConfigLive() async {
     _parseCfConfig();
     if (_cfParsedConfig == null) {
-      _showSnack(_cfConfigError.isNotEmpty ? _cfConfigError : _tr('Paste a vless:// or trojan:// URL first', 'اول یک لینک vless:// یا trojan:// پیست کن'));
+      _showSnack(_cfConfigError.isNotEmpty ? _cfConfigError : 'Paste a vless:// or trojan:// URL first');
       return;
     }
     setState(() {
@@ -2369,7 +2446,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _cfConfigOkMessage = '';
       }
     });
-    _showSnack(smoke.ok ? _tr('Config verified', 'کانفیگ تأیید شد') : smoke.message);
+    _showSnack(smoke.ok ? 'Config verified' : smoke.message);
   }
 
   Future<void> _importCfIpsFromFile() async {
@@ -2387,23 +2464,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       } else {
         final path = result.files.first.path;
         if (path == null) {
-          _showSnack(_tr('Cannot read file', 'فایل قابل خواندن نیست'));
+          _showSnack('Cannot read file');
           return;
         }
         text = await File(path).readAsString();
       }
       final ips = _expandCidrOrIps(text);
       if (ips.isEmpty) {
-        _showSnack(_tr('No valid IPs in file', 'IP معتبری در فایل نیست'));
+        _showSnack('No valid IPs in file');
         return;
       }
       setState(() {
         _cfImportedIps = ips;
         _cfIpMode = 3;
       });
-      _showSnack(_tr('Imported ${ips.length} IPs', '${ips.length} IP ایمپورت شد'));
+      _showSnack('Imported ${ips.length} IPs');
     } catch (e) {
-      _showSnack(_tr('Import error: $e', 'خطای ایمپورت: $e'));
+      _showSnack('Import error: $e');
     }
   }
 
@@ -2414,13 +2491,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_cfIpMode == 1 || _cfIpMode == 2) {
       manualIps = _expandCidrOrIps(_ipController.text);
       if (manualIps.isEmpty) {
-        _showSnack(_cfIpMode == 2 ? _tr('No valid CIDR/range!', 'CIDR/رنج معتبری نیست!') : _tr('No valid IPs found!', 'IP معتبری پیدا نشد!'));
+        _showSnack(_cfIpMode == 2 ? 'No valid CIDR/range!' : 'No valid IPs found!');
         return;
       }
     } else if (_cfIpMode == 3) {
       manualIps = List<String>.from(_cfImportedIps);
       if (manualIps.isEmpty) {
-        _showSnack(_tr('Import a file or switch to another IP source', 'یک فایل ایمپورت کن یا منبع IP دیگری انتخاب کن'));
+        _showSnack('Import a file or switch to another IP source');
         return;
       }
     }
@@ -2573,7 +2650,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
           ),
           GestureDetector(
-            onTap: () { Clipboard.setData(ClipboardData(text: r.ip)); _showSnack(_tr('Copied', 'کپی شد')); },
+            onTap: () { Clipboard.setData(ClipboardData(text: r.ip)); _showSnack('Copied'); },
             child: const Icon(Icons.copy, color: Color(0xFF00E5FF), size: 16),
           ),
         ],
@@ -2640,7 +2717,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           ? r.validation.error
                           : 'validation failed';
                       Clipboard.setData(ClipboardData(text: fullErr));
-                      _showSnack(_tr('Error copied', 'خطا کپی شد'));
+                      _showSnack('Error copied');
                     },
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2652,7 +2729,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 2),
-                        Text(_tr('tap to copy full log', 'برای کپی لاگ کامل بزن'),
+                        Text('tap to copy full log',
                             style: GoogleFonts.inter(color: const Color(0xFF888888), fontSize: 9)),
                       ],
                     ),
@@ -2661,7 +2738,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
           ),
           GestureDetector(
-            onTap: () { Clipboard.setData(ClipboardData(text: r.ip)); _showSnack(_tr('Copied', 'کپی شد')); },
+            onTap: () { Clipboard.setData(ClipboardData(text: r.ip)); _showSnack('Copied'); },
             child: Icon(Icons.copy, color: ok ? const Color(0xFF69FF47) : textSecond, size: 16),
           ),
         ],
@@ -2710,7 +2787,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           borderRadius: BorderRadius.circular(6),
                           border: Border.all(color: const Color(0xFF69FF47).withOpacity(0.4)),
                         ),
-                        child: Text(_tr('CF Edge', 'لبه CF'), style: GoogleFonts.inter(color: const Color(0xFF69FF47), fontSize: 10, fontWeight: FontWeight.w700)),
+                        child: Text('CF Edge', style: GoogleFonts.inter(color: const Color(0xFF69FF47), fontSize: 10, fontWeight: FontWeight.w700)),
                       ),
                     ],
                   ],
@@ -2752,7 +2829,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _applyDns(String ip, {bool secondary = false}) async {
     if (!Platform.isWindows) {
-      _showSnack(_tr('Apply DNS is only supported on Windows.', 'اعمال DNS فقط در ویندوز پشتیبانی میشه.'));
+      _showSnack('Apply DNS is only supported on Windows.');
       return;
     }
     if (!mounted) return;
@@ -3062,7 +3139,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           OutlinedButton.icon(
             onPressed: _applyingDns ? null : _resetDns,
             icon: const Icon(Icons.dns_outlined, size: 15),
-            label: Text(_tr('Reset to Auto DNS', 'بازگشت به DNS خودکار'), style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 12)),
+            label: Text('Reset to Auto DNS', style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 12)),
             style: OutlinedButton.styleFrom(
               foregroundColor: Colors.white54,
               side: const BorderSide(color: Colors.white24),
@@ -3191,7 +3268,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: Colors.redAccent.withOpacity(0.5)),
                     ),
-                    child: Text(_tr('Stop VPN', 'توقف VPN'),
+                    child: Text('Stop VPN',
                         style: GoogleFonts.inter(
                             color: Colors.redAccent,
                             fontWeight: FontWeight.w700,
@@ -3275,7 +3352,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 border: Border.all(
                                     color: const Color(0xFF00E5FF).withOpacity(0.5)),
                               ),
-                              child: Text(_tr('Apply', 'اعمال'),
+                              child: Text('Apply',
                                   style: GoogleFonts.inter(
                                       color: const Color(0xFF00E5FF),
                                       fontWeight: FontWeight.w700,
@@ -3294,7 +3371,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               const Expanded(child: Divider(color: Colors.white12)),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Text(_tr('or enter manually', 'یا دستی وارد کن'),
+                child: Text('or enter manually',
                     style: GoogleFonts.inter(color: Colors.white38, fontSize: 11)),
               ),
               const Expanded(child: Divider(color: Colors.white12)),
@@ -3308,7 +3385,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               children: [
                 const Icon(Icons.edit_rounded, color: Colors.white38, size: 14),
                 const SizedBox(width: 6),
-                Text(_tr('Manual DNS Entry', 'ورود دستی DNS'),
+                Text('Manual DNS Entry',
                     style: GoogleFonts.inter(
                         color: Colors.white54,
                         fontWeight: FontWeight.w600,
@@ -3336,7 +3413,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 onPressed: _dnsVpnStarting ? null : () {
                   final d1 = _manualDns1Controller.text.trim();
                   final d2 = _manualDns2Controller.text.trim();
-                  if (d1.isEmpty) { _showSnack(_tr('Enter at least DNS 1', 'حداقل DNS 1 رو وارد کن')); return; }
+                  if (d1.isEmpty) { _showSnack('Enter at least DNS 1'); return; }
                   _startDnsVpn(d1, dns2: d2.isEmpty ? null : d2);
                 },
                 icon: _dnsVpnStarting
@@ -3344,7 +3421,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         width: 14, height: 14,
                         child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.play_arrow_rounded, size: 16),
-                label: Text(_tr('Apply Manual DNS', 'اعمال DNS دستی'),
+                label: Text('Apply Manual DNS',
                     style: GoogleFonts.inter(
                         fontWeight: FontWeight.w700, fontSize: 13)),
                 style: FilledButton.styleFrom(
@@ -3406,21 +3483,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _dnsVpnActiveDns2  = dns2;
           _dnsVpnStarting    = false;
         });
-        _showSnack(_tr('✓ DNS VPN active — routing through $dns1', '✓ DNS VPN فعال شد — مسیریابی از طریق $dns1'));
+        _showSnack('✓ DNS VPN active — routing through \$dns1');
       }
     } on PlatformException catch (e) {
       if (mounted) {
         setState(() { _dnsVpnStarting = false; });
         if (e.code == 'VPN_DENIED') {
-          _showSnack(_tr('VPN permission denied. Please allow it and try again.', 'دسترسی VPN رد شد. لطفاً مجوز بده و دوباره امتحان کن.'));
+          _showSnack('VPN permission denied. Please allow it and try again.');
         } else {
-          _showSnack(_tr('Failed to start DNS VPN: ${e.message}', 'خطا در شروع DNS VPN: ${e.message}'));
+          _showSnack('Failed to start DNS VPN: \${e.message}');
         }
       }
     } catch (e) {
       if (mounted) {
         setState(() { _dnsVpnStarting = false; });
-        _showSnack(_tr('Error: $e', 'خطا: $e'));
+        _showSnack('Error: \$e');
       }
     }
   }
@@ -3435,10 +3512,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _dnsVpnActiveDns1 = null;
           _dnsVpnActiveDns2 = null;
         });
-        _showSnack(_tr('DNS VPN stopped.', 'DNS VPN متوقف شد.'));
+        _showSnack('DNS VPN stopped.');
       }
     } catch (e) {
-      _showSnack(_tr('Error stopping VPN: $e', 'خطا در توقف VPN: $e'));
+      _showSnack('Error stopping VPN: \$e');
     }
   }
 
@@ -3701,7 +3778,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 OutlinedButton.icon(
                   onPressed: _cancelDnsScan,
                   icon: const Icon(Icons.stop_rounded, size: 16),
-                  label: Text(_tr('Cancel', 'لغو'), style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  label: Text('Cancel', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.redAccent,
                     side: const BorderSide(color: Colors.redAccent),
@@ -3716,13 +3793,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           Row(
             children: [
               if (_dnsResults != null && _dnsResults!.isNotEmpty) ...[
-                _miniBtn(_tr('Copy Top 5 DNS', 'کپی ۵ DNS برتر'), _copyTop5Dns, isAccent: true),
+                _miniBtn('Copy Top 5 DNS', _copyTop5Dns, isAccent: true),
                 const SizedBox(width: 8),
               ],
               _miniBtn(
                 _dnsUpdating
-                    ? _tr('Updating…', 'در حال بروزرسانی...')
-                    : _tr('Update Online (${_activeDnsServers.length})', 'بروزرسانی آنلاین (${_activeDnsServers.length})'),
+                    ? 'Updating…'
+                    : 'Update Online (${_activeDnsServers.length})',
                 _dnsUpdating ? () {} : _updateDnsOnline,
               ),
             ],
@@ -3808,14 +3885,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           // Results
           if (_dnsResults != null) ...[
             const SizedBox(height: 14),
-            Text(_tr('Top DNS Servers', 'بهترین سرورهای DNS'),
+            Text('Top DNS Servers',
                 style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.bold, color: textPrimary)),
             const SizedBox(height: 8),
             if (_dnsResults!.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 child: Center(
-                  child: Text(_tr('No results found.', 'نتیجه‌ای پیدا نشد.'),
+                  child: Text('No results found.',
                       style: GoogleFonts.inter(color: textSecond, fontSize: 13)),
                 ),
               )
@@ -3857,7 +3934,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             const SizedBox(height: 16),
             Center(
               child: Text(
-                _tr('Tap "Start DNS Scan" to find\nthe best DNS servers on your network.', 'روی «اسکن DNS» بزن تا بهترین سرورهای DNS پیدا بشن.'),
+                'Tap "Start DNS Scan" to find\nthe best DNS servers on your network.',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.inter(color: textSecond, fontSize: 13, height: 1.5),
               ),
@@ -3913,7 +3990,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _copyTop5Dns() {
     if (_dnsResults == null || _dnsResults!.isEmpty) {
-      _showSnack(_tr('No DNS results yet!', 'هنوز نتیجه DNS نیست!'));
+      _showSnack('No DNS results yet!');
       return;
     }
     final top5 = _dnsResults!.take(5).toList();
@@ -3923,7 +4000,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       return '#$rank  ${s.ip}  (${latency}ms)';
     }).join('\n');
     Clipboard.setData(ClipboardData(text: text));
-    _showSnack(_tr('✓ Top ${top5.length} DNS copied!', '✓ ${top5.length} DNS برتر کپی شد!'));
+    _showSnack('\u2713 Top ${top5.length} DNS copied!');
   }
 
   Future<void> _updateDnsOnline() async {
@@ -4013,7 +4090,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           // ── Header ──────────────────────────────────────────────────────
           Row(
             children: [
-              Text(_tr('CDN PROFILE', 'پروفایل CDN'),
+              Text(_l.rangeTitle,
                   style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
               const Spacer(),
               GestureDetector(
@@ -4030,38 +4107,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   child: Row(children: [
                     const Icon(Icons.history_rounded, color: accentLime, size: 14),
                     const SizedBox(width: 4),
-                    Text(_tr('History', 'تاریخچه'), style: GoogleFonts.inter(color: accentLime, fontSize: 11, fontWeight: FontWeight.w600)),
+                    Text(_l.history, style: GoogleFonts.inter(color: accentLime, fontSize: 11, fontWeight: FontWeight.w600)),
                   ]),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
-
-          // ── CDN Profile ──────────────────────────────────────────────────
-          Row(children: [
-            _buildRangeProfileBtn('cloudflare', '☁️ Cloudflare'),
-            const SizedBox(width: 8),
-            _buildRangeProfileBtn('akamai', '🌐 Akamai'),
-          ]),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
+          Text(_l.rangeFastHint,
+              style: GoogleFonts.inter(color: accentLime.withOpacity(0.9), fontSize: 11, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 14),
 
           // ── SELECT RANGE (multi-select) ───────────────────────────────────
           Row(
             children: [
-              Text(_tr('SELECT RANGE', 'انتخاب رنج'),
+              Text(_l.selectRange,
                   style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
               const Spacer(),
               if (_selectedRangeCidrs.isNotEmpty)
                 GestureDetector(
                   onTap: () => setState(() => _selectedRangeCidrs.clear()),
-                  child: Text(_tr('Clear all', 'پاک کردن همه'),
+                  child: Text(_l.clearAll,
                       style: GoogleFonts.inter(color: const Color(0xFFFF5252), fontSize: 10, fontWeight: FontWeight.w600)),
                 ),
             ],
           ),
           const SizedBox(height: 4),
-          Text('چند تا رو با هم انتخاب کن',
+          Text(_l.selectMulti,
+              textDirection: _usePersian ? TextDirection.rtl : TextDirection.ltr,
               style: GoogleFonts.inter(color: textSecond, fontSize: 10)),
           const SizedBox(height: 8),
 
@@ -4072,7 +4145,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           else if (_rangeCidrs.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(_tr('Tap a profile above to load ranges.', 'یک پروفایل بالا انتخاب کن تا رنج‌ها لود بشن.'),
+              child: Text(_l.tapLoadRanges,
                   style: GoogleFonts.inter(color: textSecond, fontSize: 12)),
             )
           else
@@ -4143,7 +4216,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   const Icon(Icons.playlist_add_check_rounded, color: accentLime, size: 14),
                   const SizedBox(width: 6),
-                  Text('${_selectedRangeCidrs.length} ' + _tr('ranges selected', 'رنج انتخاب شده'),
+                  Text(_l.rangesSelected(_selectedRangeCidrs.length),
                       style: GoogleFonts.inter(color: accentLime, fontSize: 11, fontWeight: FontWeight.w600)),
                 ],
               ),
@@ -4153,10 +4226,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           const SizedBox(height: 16),
 
           // ── CUSTOM CIDR ───────────────────────────────────────────────────
-          Text(_tr('CUSTOM RANGE (CIDR)', 'رنج دلخواه (CIDR)'),
+          Text(_l.customCidrTitle,
               style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
           const SizedBox(height: 4),
-          Text('مثلاً: 2.16.0.0/24 یا فقط 2.16.0.0 برای یک IP',
+          Text(_l.customCidrHint,
               style: GoogleFonts.inter(color: textSecond, fontSize: 10)),
           const SizedBox(height: 8),
           TextField(
@@ -4216,7 +4289,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           // ── SAVED RANGES + Import/Export ──────────────────────────────────
           Row(
             children: [
-              Text(_tr('SAVED RANGES', 'رنج‌های ذخیره‌شده'),
+              Text('SAVED RANGES',
                   style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
               const Spacer(),
               GestureDetector(
@@ -4227,7 +4300,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   child: Row(children: [
                     const Icon(Icons.upload_file_rounded, color: accentLime, size: 13),
                     const SizedBox(width: 3),
-                    Text(_tr('Import', 'ایمپورت'), style: GoogleFonts.inter(color: accentLime, fontSize: 10, fontWeight: FontWeight.w600)),
+                    Text('Import', style: GoogleFonts.inter(color: accentLime, fontSize: 10, fontWeight: FontWeight.w600)),
                   ]),
                 ),
               ),
@@ -4244,7 +4317,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   child: Row(children: [
                     Icon(Icons.download_rounded, color: _savedCidrs.isEmpty ? textSecond.withOpacity(0.4) : accentLime, size: 13),
                     const SizedBox(width: 3),
-                    Text(_tr('Export', 'خروجی'),
+                    Text('Export',
                         style: GoogleFonts.inter(
                             color: _savedCidrs.isEmpty ? textSecond.withOpacity(0.4) : accentLime,
                             fontSize: 10, fontWeight: FontWeight.w600)),
@@ -4419,7 +4492,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ),
                       if (_total > 0) ...[
                         if (_scanning)
-                          Text('ETA ${_calcEta()}',
+                          Text('${_l.eta} ${_calcEta()}',
                               style: GoogleFonts.inter(color: textSecond, fontSize: 10)),
                         const SizedBox(width: 6),
                         Text('$_done / $_total',
@@ -4460,41 +4533,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
     );
   }
-  Widget _buildRangeProfileBtn(String value, String label) {
-    final active = _rangeCdnProfile == value;
-    return Expanded(
-      child: GestureDetector(
-        onTap: _loadingRangeCidrs
-            ? null
-            : () {
-                setState(() {
-                  _rangeCdnProfile = value;
-                  _rangeCidrs = [];
-                  _selectedRangeCidrs.clear();
-                });
-                _loadRangeCidrs();
-              },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: active ? accentLime.withOpacity(0.12) : iconBg,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-                color: active ? accentLime : borderColor,
-                width: active ? 1.5 : 1),
-          ),
-          child: Text(label,
-              style: GoogleFonts.inter(
-                  color: active ? accentLime : textPrimary,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13),
-              textAlign: TextAlign.center),
-        ),
-      ),
-    );
-  }
-
   String _formatMemoryCount(int n) {
     if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
     if (n >= 1000) return '${(n / 1000).toStringAsFixed(0)}K';
@@ -4820,9 +4858,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _loadRangeCidrs() {
     final meta = kCdnProviders.firstWhere(
-      (m) => (_rangeCdnProfile == 'cloudflare'
-          ? m.provider == CdnProvider.cloudflare
-          : m.provider == CdnProvider.akamai),
+      (m) => m.provider == CdnProvider.akamai,
     );
     // Increment generation counter — any in-flight fetch with an older
     // generation will discard its result, preventing stale data overwriting
@@ -4864,12 +4900,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       _importedIps.isEmpty
                         ? null : _startScan),
               style: ElevatedButton.styleFrom(
-                backgroundColor: _scanning ? const Color(0xFF3A1A1A) : accentLime,
-                foregroundColor: _scanning ? const Color(0xFFFF5252) : bgColor,
+                backgroundColor: _scanning ? statusRed : accentLime,
+                foregroundColor: _scanning ? accentLime : bgColor,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 elevation: 0,
                 side: BorderSide(
-                    color: _scanning ? const Color(0xFFFF5252) : Colors.transparent,
+                    color: _scanning ? accentLime : Colors.transparent,
                     width: 1.5),
               ),
               child: Row(
@@ -4877,7 +4913,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   Icon(_scanning ? Icons.stop_rounded : Icons.radar_rounded, size: 20),
                   const SizedBox(width: 8),
-                  Text(_scanning ? _tr('STOP SCAN', 'توقف اسکن') : _tr('START SCAN', 'شروع اسکن'),
+                  Text(_scanning ? _l.stopScan : _l.startScan,
                       style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 15, letterSpacing: 0.5)),
                 ],
               ),
@@ -4924,7 +4960,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               if (_total > 0) ...[
                 // p43: ETA
                 if (_scanning)
-                  Text('ETA ${_calcEta()}',
+                  Text('${_l.eta} ${_calcEta()}',
                       style: GoogleFonts.inter(color: textSecond, fontSize: 11)),
                 const SizedBox(width: 8),
                 Text('$_done / $_total',
@@ -4972,7 +5008,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(_tr('LIVE METRICS', 'متریک‌های زنده'),
+          Text(_l.liveMetrics,
               style: GoogleFonts.inter(color: textSecond, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.2)),
           const SizedBox(height: 10),
           Row(
@@ -5079,23 +5115,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   children: [
                     Text('${list.length}', style: GoogleFonts.inter(color: textSecond, fontSize: 11)),
                     const SizedBox(width: 6),
-                    _miniBtn(_tr('Latency', 'تأخیر'), () => setState(() { _sortBy = 'latency'; _displayDirty = true; }), isActive: _sortBy == 'latency'),
+                    _miniBtn(_l.sortLatency, () => setState(() { _sortBy = 'latency'; _displayDirty = true; }), isActive: _sortBy == 'latency'),
                     const SizedBox(width: 5),
-                    _miniBtn(_tr('Score', 'امتیاز'), () => setState(() { _sortBy = 'speed'; _displayDirty = true; }), isActive: _sortBy == 'speed'),
+                    _miniBtn(_l.sortScore, () => setState(() { _sortBy = 'speed'; _displayDirty = true; }), isActive: _sortBy == 'speed'),
                     const SizedBox(width: 5),
-                    _miniBtn(_tr('Rel', 'قابلیت'), () => setState(() { _sortBy = 'reliability'; _displayDirty = true; }), isActive: _sortBy == 'reliability'),
+                    _miniBtn(_l.sortRel, () => setState(() { _sortBy = 'reliability'; _displayDirty = true; }), isActive: _sortBy == 'reliability'),
                     const SizedBox(width: 5),
                     // cf1: sort by datacenter
-                    _miniBtn('Colo', () => setState(() { _sortBy = _sortBy == 'colo' ? 'latency' : 'colo'; _displayDirty = true; }), isActive: _sortBy == 'colo'),
+                    _miniBtn(_l.sortColo, () => setState(() { _sortBy = _sortBy == 'colo' ? 'latency' : 'colo'; _displayDirty = true; }), isActive: _sortBy == 'colo'),
                     const SizedBox(width: 5),
                     // p39: advanced filters
-                    _miniBtn(_tr('All', 'همه'), () => setState(() { _advancedFilter = 'all'; _displayDirty = true; }), isActive: _advancedFilter == 'all'),
+                    _miniBtn(_l.filterAll, () => setState(() { _advancedFilter = 'all'; _displayDirty = true; }), isActive: _advancedFilter == 'all'),
                     const SizedBox(width: 5),
-                    _miniBtn('★★★', () => setState(() { _advancedFilter = 'excellent'; _displayDirty = true; }), isActive: _advancedFilter == 'excellent'),
+                    _miniBtn(_l.filterExcellent, () => setState(() { _advancedFilter = 'excellent'; _displayDirty = true; }), isActive: _advancedFilter == 'excellent'),
                     const SizedBox(width: 5),
-                    _miniBtn('<150ms', () => setState(() { _advancedFilter = 'low_rtt'; _displayDirty = true; }), isActive: _advancedFilter == 'low_rtt'),
+                    _miniBtn(_l.filterLowRtt, () => setState(() { _advancedFilter = 'low_rtt'; _displayDirty = true; }), isActive: _advancedFilter == 'low_rtt'),
                     const SizedBox(width: 5),
-                    _miniBtn(_tr('Alive', 'زنده'), () => setState(() { _advancedFilter = 'alive'; _displayDirty = true; }), isActive: _advancedFilter == 'alive'),
+                    _miniBtn(_l.filterAlive, () => setState(() { _advancedFilter = 'alive'; _displayDirty = true; }), isActive: _advancedFilter == 'alive'),
                     const SizedBox(width: 5),
                     // cf1/ws2: WS filter buttons
                     _miniBtn('WS ✓', () => setState(() { _advancedFilter = _advancedFilter == 'ws_ok' ? 'all' : 'ws_ok'; _displayDirty = true; }), isActive: _advancedFilter == 'ws_ok'),
@@ -5103,7 +5139,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     _miniBtn('WS ✗', () => setState(() { _advancedFilter = _advancedFilter == 'ws_fail' ? 'all' : 'ws_fail'; _displayDirty = true; }), isActive: _advancedFilter == 'ws_fail'),
                     const SizedBox(width: 5),
                     // p45: compact mode
-                    _miniBtn(_compactMode ? _tr('Full', 'کامل') : _tr('Compact', 'فشرده'), () => setState(() => _compactMode = !_compactMode)),
+                    _miniBtn(_compactMode ? _l.fullView : _l.compact, () => setState(() => _compactMode = !_compactMode)),
                   ],
                 ),
               ),
@@ -5116,7 +5152,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     onChanged: (v) => setState(() { _coloFilter = v; _displayDirty = true; }),
                     style: GoogleFonts.robotoMono(color: textPrimary, fontSize: 12),
                     decoration: InputDecoration(
-                      hintText: 'Filter by datacenter (e.g. FRA)',
+                      hintText: _l.coloFilterHint,
                       hintStyle: GoogleFonts.inter(color: textSecond, fontSize: 11),
                       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
                       filled: true,
@@ -5146,11 +5182,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   children: [
                     _buildCopyButton(),
                     const SizedBox(width: 5),
-                    _miniBtn(_tr('Save TXT', 'ذخیره TXT'), _saveResults),
+                    _miniBtn(_l.saveTxt, _saveResults),
                     const SizedBox(width: 5),
-                    _miniBtn(_tr('Export JSON', 'خروجی JSON'), _exportJson),   // p40
+                    _miniBtn(_l.exportJson, _exportJson),   // p40
                     const SizedBox(width: 5),
-                    _miniBtn(_tr('Retest ❌', 'اسکن مجدد ❌'), _retestFailed),   // p41
+                    _miniBtn(_l.retestFailed, _retestFailed),   // p41
                   ],
                 ),
               ),
@@ -5165,7 +5201,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     children: [
                       Icon(Icons.radar_rounded, color: textSecond, size: 48),
                       const SizedBox(height: 12),
-                      Text(_tr('No results yet.\nGo scan some IPs!', 'هنوز نتیجه‌ای نیست.\nبرو چند IP اسکن کن!'),
+                      Text(_l.noResultsYet,
                           textAlign: TextAlign.center,
                           style: GoogleFonts.inter(color: textSecond, fontSize: 15)),
                     ],
@@ -5199,7 +5235,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           child: Row(children: [
             const Icon(Icons.filter_5_rounded, color: accentLime, size: 18),
             const SizedBox(width: 8),
-            Text(_tr('Copy Top 5', 'کپی ۵ تای اول'), style: GoogleFonts.inter(color: textPrimary, fontWeight: FontWeight.w600, fontSize: 13)),
+            Text('Copy Top 5', style: GoogleFonts.inter(color: textPrimary, fontWeight: FontWeight.w600, fontSize: 13)),
           ]),
         ),
         PopupMenuItem(
@@ -5207,7 +5243,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           child: Row(children: [
             const Icon(Icons.copy_all_rounded, color: accentLime, size: 18),
             const SizedBox(width: 8),
-            Text(_tr('Copy All', 'کپی همه'), style: GoogleFonts.inter(color: textPrimary, fontWeight: FontWeight.w600, fontSize: 13)),
+            Text('Copy All', style: GoogleFonts.inter(color: textPrimary, fontWeight: FontWeight.w600, fontSize: 13)),
           ]),
         ),
       ],
@@ -5220,7 +5256,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(_tr('Copy', 'کپی'), style: GoogleFonts.inter(color: accentLime, fontSize: 11, fontWeight: FontWeight.w600)),
+            Text('Copy', style: GoogleFonts.inter(color: accentLime, fontSize: 11, fontWeight: FontWeight.w600)),
             const SizedBox(width: 3),
             const Icon(Icons.expand_more_rounded, color: accentLime, size: 14),
           ],
@@ -5304,7 +5340,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(color: const Color(0xFFFF5252).withOpacity(0.15), borderRadius: BorderRadius.circular(6)),
-                  child: Text(_tr('DEAD', 'غیرفعال'), style: GoogleFonts.inter(color: const Color(0xFFFF5252), fontSize: 10, fontWeight: FontWeight.w700)),
+                  child: Text('DEAD', style: GoogleFonts.inter(color: const Color(0xFFFF5252), fontSize: 10, fontWeight: FontWeight.w700)),
                 ),
               ] else if (r.loss > 30) ...[
                 const SizedBox(width: 6),
@@ -5430,7 +5466,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     children: [
                       const Icon(Icons.refresh_rounded, size: 12, color: accentLime),
                       const SizedBox(width: 4),
-                      Text(_tr('Retest', 'اسکن مجدد'), style: GoogleFonts.inter(color: accentLime, fontSize: 10, fontWeight: FontWeight.w600)),
+                      Text('Retest', style: GoogleFonts.inter(color: accentLime, fontSize: 10, fontWeight: FontWeight.w600)),
                     ],
                   ),
                 ),
@@ -5443,7 +5479,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _retestCard(ScanResult original) async {
-    _showSnack(_tr('Retesting ${original.ip}...', 'اسکن مجدد ${original.ip}...'));
+    _showSnack('Retesting ${original.ip}...');
     final result = await scanOneIp(original.ip);
     if (!mounted) return;
     setState(() {
@@ -5452,7 +5488,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _displayDirty = true;
     });
     if (result.isAlive) {
-      _showSnack(_tr('✓ ${original.ip} — ${result.latencyMs.toStringAsFixed(0)} ms', '✓ ${original.ip} — ${result.latencyMs.toStringAsFixed(0)} ms'));
+      _showSnack('✓ ${original.ip} — ${result.latencyMs.toStringAsFixed(0)} ms');
     } else {
       _showSnack('❌ ${original.ip} — Failed');
     }
@@ -5539,8 +5575,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       padding: const EdgeInsets.only(top: 4, bottom: 4),
       child: Row(
         children: [
-          Expanded(child: _navItem(0, Icons.radar_rounded, 'Scanner')),
-          Expanded(child: _navItem(1, Icons.bar_chart_rounded, 'Results')),
+          Expanded(child: _navItem(0, Icons.radar_rounded, _l.tabScan)),
+          Expanded(child: _navItem(1, Icons.bar_chart_rounded, _l.tabResults)),
         ],
       ),
     );
