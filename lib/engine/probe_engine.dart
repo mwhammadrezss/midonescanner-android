@@ -384,6 +384,7 @@ class CfMultiProbeResult {
 Future<({double latencyMs, CfHttpResult result})> _cfHttpProbeSingle(
   String ip, {
   String sni        = 'speed.cloudflare.com',
+  int port          = 443,
   int budgetMs      = 5000,
 }) async {
   Socket?             raw;
@@ -393,7 +394,7 @@ Future<({double latencyMs, CfHttpResult result})> _cfHttpProbeSingle(
     final sw = Stopwatch()..start();
 
     raw = await Socket.connect(
-      ip, 443,
+      ip, port,
       timeout: Duration(milliseconds: budgetMs ~/ 4),
     );
     await Future.delayed(Duration(microseconds: 100 + _probeRng.nextInt(900)));
@@ -453,6 +454,7 @@ Future<({double latencyMs, CfHttpResult result})> _cfHttpProbeSingle(
 Future<CfMultiProbeResult> cfHttpProbeMulti(
   String ip, {
   String sni          = '',
+  int    port         = 443,
   int    tries        = 4,
   int    budgetMs     = 5000,
   bool Function()? isCancelled,
@@ -465,7 +467,7 @@ Future<CfMultiProbeResult> cfHttpProbeMulti(
 
   for (int i = 0; i < tries; i++) {
     if (isCancelled != null && isCancelled()) break;
-    final r = await _cfHttpProbeSingle(ip, sni: effectiveSni, budgetMs: budgetMs);
+    final r = await _cfHttpProbeSingle(ip, sni: effectiveSni, port: port, budgetMs: budgetMs);
     latencies[i] = r.latencyMs;
     if (r.result.tlsOk)    tlsOk      = true;
     if (r.result.httpStatus > 0) httpStatus = r.result.httpStatus;

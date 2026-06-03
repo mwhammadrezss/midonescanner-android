@@ -1,8 +1,9 @@
 // lib/engine/isolate_scan_engine.dart
 // ─── Multi-Isolate Parallel Scan Engine ──────────────────────────────────────
 //
-// Large IP lists: batched prefilter + scan to avoid socket exhaustion (was:
-// Future.wait over entire chunk → mass false "dead" on prefilter, 0 full scans).
+// Large IP lists: prefilter runs once on the main isolate (global socket cap),
+// then scan workers only probe live IPs — avoids N-isolate prefilter stampedes
+// on Android that marked every IP dead and left progress at 0/N.
 
 import 'dart:async';
 import 'dart:io';
@@ -42,23 +43,36 @@ int get _isolateConcurrency {
   return 20;
 }
 
-/// Fewer isolates on large lists → less aggregate socket pressure.
+/// Fewer isolates on large lists → less aggregate socket pressure during TLS scan.
 int _isolatesForIpCount(int totalIps) {
   final cap = _maxIsolates;
+  if (Platform.isAndroid) {
+    if (totalIps <= 16) return 1;
+    if (totalIps <= 128) return min(cap, 2);
+    return min(cap, 2);
+  }
   if (totalIps <= 32) return min(cap, max(1, totalIps));
   if (totalIps <= 256) return min(cap, 4);
   if (totalIps <= 2000) return min(cap, 4);
   return min(cap, 2);
 }
 
-/// Per-isolate prefilter slots so total ≈ [_globalPrefilterCap].
-int _globalPrefilterCap = 64;
+/// Main-isolate TCP prefilter concurrency (single global cap).
+int _mainPrefilterConcurrency(int totalIps) {
+  if (Platform.isAndroid) {
+    if (totalIps > 2000) return 16;
+    if (totalIps > 500) return 24;
+    if (totalIps > 100) return 32;
+    return 40;
+  }
+  if (totalIps > 2000) return 48;
+  if (totalIps > 500) return 64;
+  return 96;
+}
 
-int _prefilterConcurrencyFor(int totalIps, int numIsolates) {
-  _globalPrefilterCap = totalIps > 500
-      ? (Platform.isAndroid ? 48 : 96)
-      : (Platform.isAndroid ? 64 : 128);
-  return max(4, (_globalPrefilterCap / numIsolates).ceil());
+int _prefilterBatchSizeFor(int totalIps) {
+  if (Platform.isAndroid && totalIps > 200) return 32;
+  return _prefilterBatchSize;
 }
 
 int _scanConcurrencyFor(int totalIps, int numIsolates) {
@@ -83,7 +97,6 @@ class _WorkerConfig {
   final String? normalSniOverride;
   final bool isCfScan;
   final int concurrency;
-  final int prefilterConcurrency;
   final Uint8List? geoipBytes;
 
   const _WorkerConfig({
@@ -95,7 +108,6 @@ class _WorkerConfig {
     this.normalSniOverride,
     this.isCfScan = false,
     required this.concurrency,
-    required this.prefilterConcurrency,
     this.geoipBytes,
   });
 }
@@ -103,20 +115,6 @@ class _WorkerConfig {
 class _WorkerReady {
   final SendPort cancelPort;
   const _WorkerReady(this.cancelPort);
-}
-
-class _WorkerPrefilterDone {
-  final int workerIndex;
-  final int liveCount;
-  final int totalCount;
-  const _WorkerPrefilterDone(this.workerIndex, this.liveCount, this.totalCount);
-}
-
-class _WorkerPrefilterProgress {
-  final int workerIndex;
-  final int done;
-  final int total;
-  const _WorkerPrefilterProgress(this.workerIndex, this.done, this.total);
 }
 
 class _WorkerBatch {
@@ -178,11 +176,16 @@ Future<List<String>> _batchedPrefilter({
   required Semaphore sem,
   required bool Function() isCancelled,
   required void Function(int done, int total)? onBatchProgress,
+  int? batchSize,
 }) async {
+  final batchSz = batchSize ?? _prefilterBatchSize;
+  final interBatchMs = (Platform.isAndroid && ips.length > 128)
+      ? 40
+      : (ips.length > 128 ? 25 : 0);
   final live = <String>[];
-  for (int i = 0; i < ips.length; i += _prefilterBatchSize) {
+  for (int i = 0; i < ips.length; i += batchSz) {
     if (isCancelled()) break;
-    final batch = ips.sublist(i, min(i + _prefilterBatchSize, ips.length));
+    final batch = ips.sublist(i, min(i + batchSz, ips.length));
     final batchLive = await Future.wait(batch.map((ip) async {
       if (isCancelled()) return null;
       await sem.acquire();
@@ -200,8 +203,8 @@ Future<List<String>> _batchedPrefilter({
     }));
     live.addAll(batchLive.whereType<String>());
     onBatchProgress?.call(min(i + batch.length, ips.length), ips.length);
-    if (ips.length > 128 && i + _prefilterBatchSize < ips.length) {
-      await Future.delayed(const Duration(milliseconds: 25));
+    if (interBatchMs > 0 && i + batchSz < ips.length) {
+      await Future.delayed(Duration(milliseconds: interBatchMs));
     }
   }
   return live;
@@ -227,25 +230,7 @@ Future<void> _workerMain(_WorkerConfig config) async {
     }
 
     final results = <ScanResult>[];
-
-    final fastProbe = FastProbeEngine(defaultTimeoutMs: _prefilterTimeoutMs);
-    final prefilterSem = Semaphore(config.prefilterConcurrency);
-
-    final liveIps = await _batchedPrefilter(
-      ips: config.ips,
-      fastProbe: fastProbe,
-      sem: prefilterSem,
-      isCancelled: cancelled,
-      onBatchProgress: (done, total) {
-        config.replyPort.send(
-          _WorkerPrefilterProgress(config.workerIndex, done, total),
-        );
-      },
-    );
-
-    config.replyPort.send(
-      _WorkerPrefilterDone(config.workerIndex, liveIps.length, config.ips.length),
-    );
+    final liveIps = config.ips;
 
     if (liveIps.isEmpty) {
       config.replyPort.send(
@@ -368,23 +353,39 @@ Future<List<ScanResult>> runIsolateScanEngine(
   } catch (_) {}
 
   final cancelCheck = isCancelled ?? () => false;
-  final numIsolates = _isolatesForIpCount(ips.length);
-  final concurrency = _scanConcurrencyFor(ips.length, numIsolates);
-  final prefilterConc = _prefilterConcurrencyFor(ips.length, numIsolates);
+  final totalIps = ips.length;
 
-  final chunkSize = (ips.length / numIsolates).ceil();
-  final chunks = <List<String>>[];
-  for (int i = 0; i < ips.length; i += chunkSize) {
-    chunks.add(ips.sublist(i, min(i + chunkSize, ips.length)));
+  // ── Phase 1: centralized TCP prefilter (main isolate, one global socket cap)
+  final prefilterProbe = FastProbeEngine(defaultTimeoutMs: _prefilterTimeoutMs);
+  final prefilterSem = Semaphore(_mainPrefilterConcurrency(totalIps));
+  final liveIps = await _batchedPrefilter(
+    ips: ips,
+    fastProbe: prefilterProbe,
+    sem: prefilterSem,
+    isCancelled: cancelCheck,
+    batchSize: _prefilterBatchSizeFor(totalIps),
+    onBatchProgress: onPrefilterProgress,
+  );
+
+  onPrefilterDone?.call(liveIps.length, totalIps);
+  if (liveIps.isEmpty || cancelCheck()) {
+    return [];
   }
 
-  final totalIps = ips.length;
-  int totalDone = 0;
-  int totalLive = 0;
-  final prefilterProgressByWorker = <int, int>{};
-  final workersPrefilterReported = <int>{};
+  // ── Phase 2: TLS/full scan across isolates (live IPs only)
+  final numIsolates = _isolatesForIpCount(liveIps.length);
+  final concurrency = _scanConcurrencyFor(liveIps.length, numIsolates);
 
-  final topResults = _TopNResults(maxCapacity: min(20000, ips.length + 500));
+  final chunkSize = (liveIps.length / numIsolates).ceil();
+  final chunks = <List<String>>[];
+  for (int i = 0; i < liveIps.length; i += chunkSize) {
+    chunks.add(liveIps.sublist(i, min(i + chunkSize, liveIps.length)));
+  }
+
+  final totalLive = liveIps.length;
+  int totalDone = 0;
+
+  final topResults = _TopNResults(maxCapacity: min(20000, liveIps.length + 500));
   final completer = Completer<void>();
   int workersRemaining = chunks.length;
 
@@ -418,14 +419,6 @@ Future<List<ScanResult>> runIsolateScanEngine(
     });
   });
 
-  bool prefilterReported = false;
-  void maybeReportPrefilterDone() {
-    if (prefilterReported) return;
-    if (workersPrefilterReported.length < chunks.length) return;
-    prefilterReported = true;
-    onPrefilterDone?.call(totalLive, totalIps);
-  }
-
   for (int wi = 0; wi < chunks.length; wi++) {
     if (cancelCheck()) break;
 
@@ -441,7 +434,6 @@ Future<List<ScanResult>> runIsolateScanEngine(
       normalSniOverride: normalSniOverride,
       isCfScan: isCfScan,
       concurrency: concurrency,
-      prefilterConcurrency: prefilterConc,
       geoipBytes: geoBytes,
     );
 
@@ -452,11 +444,6 @@ Future<List<ScanResult>> runIsolateScanEngine(
       try {
         receivePort.close();
       } catch (_) {}
-
-      if (!workersPrefilterReported.contains(workerIndex)) {
-        workersPrefilterReported.add(workerIndex);
-        maybeReportPrefilterDone();
-      }
 
       workersRemaining--;
       if (workersRemaining <= 0 && !completer.isCompleted) completer.complete();
@@ -473,29 +460,12 @@ Future<List<ScanResult>> runIsolateScanEngine(
         return;
       }
 
-      if (msg is _WorkerPrefilterProgress) {
-        prefilterProgressByWorker[msg.workerIndex] = msg.done;
-        final sum = prefilterProgressByWorker.values.fold<int>(0, (a, b) => a + b);
-        onPrefilterProgress?.call(min(sum, totalIps), totalIps);
-        return;
-      }
-
-      if (msg is _WorkerPrefilterDone) {
-        totalLive += msg.liveCount;
-        if (workersPrefilterReported.add(msg.workerIndex)) {
-          maybeReportPrefilterDone();
-        }
-      } else if (msg is _WorkerBatch) {
+      if (msg is _WorkerBatch) {
         topResults.addAll(msg.results);
         if (msg.results.isNotEmpty) {
-          // FIX(denom-race): only use totalLive after ALL prefilter counts are in.
-          // If first batch arrives before _WorkerPrefilterDone, totalLive is
-          // partial (could be 0). Sending 0 as denom makes main.dart skip the
-          // _total update safely until onPrefilterDone sets the real value.
-          final denom = prefilterReported ? totalLive : 0;
           for (final r in msg.results) {
             totalDone++;
-            onProgress?.call(totalDone, denom, r);
+            onProgress?.call(totalDone, totalLive, r);
           }
         }
       } else if (msg is _WorkerDone) {
@@ -527,7 +497,7 @@ Future<List<ScanResult>> runIsolateScanEngine(
     }
   }
 
-  if (!completer.isCompleted) await completer.future;
+  if (workersRemaining > 0 && !completer.isCompleted) await completer.future;
 
   cancelPoll.cancel();
   topResults.finalize();

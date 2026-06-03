@@ -51,12 +51,8 @@ jobs:
       - name: 📦 Get packages
         run: flutter pub get
 
-      - name: 📁 Ensure assets/xray dir exists
-        run: |
-          mkdir -p assets/xray
-          echo "✅ assets/xray ready (xray binary not bundled — TLS-only mode)"
-          # xray binary is NOT used — xray_validator.dart uses TLS check only.
-          # Removed: xray-arm64 (35MB) + geoip.dat + geosite.dat → saves ~12MB APK
+      - name: 📁 assets/xray (Android — Phase 2 uses TLS/WS, no xray binary in APK)
+        run: mkdir -p assets/xray
 
       - name: 🔨 Build APK
         run: flutter build apk --release --no-shrink
@@ -120,11 +116,17 @@ jobs:
             Write-Host "ℹ️ windows/ already exists"
           }
 
-      - name: 📁 Ensure assets/xray dir exists (required by pubspec.yaml)
+      - name: 📥 Bundle xray for Windows assets + Release folder
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "assets\xray" | Out-Null
-          Write-Host "✅ assets/xray directory ready"
+          $zip = "xray-win.zip"
+          Invoke-WebRequest -Uri "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-windows-64.zip" -OutFile $zip -UseBasicParsing
+          Expand-Archive $zip -DestinationPath xray_tmp -Force
+          $bin = Get-ChildItem xray_tmp -Recurse -Filter "xray.exe" | Select-Object -First 1
+          if (-not $bin) { throw "xray.exe not found" }
+          Copy-Item $bin.FullName "assets\xray\xray-windows-amd64.exe" -Force
+          Write-Host "✅ assets/xray/xray-windows-amd64.exe"
 
       - name: 🔨 Build Windows Release
         run: flutter build windows --release

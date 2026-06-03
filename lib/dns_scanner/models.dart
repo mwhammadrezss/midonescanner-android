@@ -153,6 +153,23 @@ class ScanConfig {
   final List<String> dohProviders;
   final int packetLossProbes;
 
+  /// Iran gaming: prioritize latency/jitter/packet-loss; keep top 2 for apply.
+  factory ScanConfig.gamingIran() => const ScanConfig(
+        stage1KeepTop: 150,
+        stage3KeepTop: 60,
+        stage4KeepTop: 15,
+        stage5KeepTop: 2,
+        weightFreedom: 0.45,
+        weightLatency: 0.30,
+        weightJitter: 0.25,
+        burstCount: 12,
+        packetLossProbes: 8,
+        freedomDomains: [
+          'google.com', 'youtube.com', 'discord.com', 'telegram.org',
+          'cloudflare.com', 'steampowered.com', 'epicgames.com',
+        ],
+      );
+
   const ScanConfig({
     this.stage1KeepTop   = 200,
     this.stage3KeepTop   = 80,

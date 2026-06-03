@@ -11,8 +11,11 @@
 //   7. Default concurrency=50, timeout=5s, count=500, tries=4 (SenPai defaults)
 
 import 'dart:async';
+import 'dart:io';
+
 import '../xray/config_parser.dart';
 import '../xray/xray_validator.dart';
+import '../services/xray_binary_service.dart';
 import 'cf_ip_ranges.dart';
 import 'probe_engine.dart' show cfHttpProbeMulti, cfWsProbe,
     CfMultiProbeResult, cfHttpProbe;
@@ -39,6 +42,7 @@ enum CfSortMode {
 
 class CfPhase1Result {
   final String ip;
+  final int    port;
   final bool   isEdge;      // IsHealthy() — loss<50% AND CF edge criteria
   final double latencyMs;   // backward compat (= avgMs)
   final String colo;
@@ -56,6 +60,7 @@ class CfPhase1Result {
 
   const CfPhase1Result({
     required this.ip,
+    this.port = 443,
     required this.isEdge,
     required this.latencyMs,
     required this.colo,
@@ -74,16 +79,17 @@ class CfPhase1Result {
   factory CfPhase1Result.fromMulti(
     CfMultiProbeResult multi,
     String ip, {
+    int port = 443,
     bool? wsOk,
     bool? requireWs,
   }) {
-    // IsHealthy() — mirrors SenPai result.IsHealthy() for ModeHTTP + RequireWS
-    bool healthy = multi.isCloudflareEdge;
+    bool healthy = multi.isHealthy(port: port);
     if (healthy && (requireWs == true)) {
       healthy = wsOk == true;
     }
     return CfPhase1Result(
       ip:           ip,
+      port:         port,
       isEdge:       healthy,
       latencyMs:    multi.avgMs,
       colo:         multi.colo,
@@ -251,6 +257,9 @@ typedef IsCancelledFn    = bool Function();
 ///
 /// Rate limiting: maxProbesPerSec (mirrors SenPai rate.Limiter)
 /// RunList: top edges re-probed with 10s timeout (mirrors SenPai RunList)
+/// SenPai CDN ports (multi-select in UI).
+const kCfDefaultPorts = [443, 8443, 2053, 2083, 2087, 2096];
+
 Future<List<CfPhase2Result>> runCfXrayScanner({
   required List<String>         ips,
   required int                  sampleCount,
@@ -262,15 +271,24 @@ Future<List<CfPhase2Result>> runCfXrayScanner({
   required OnPhase2Progress     onPhase2Progress,
   required IsCancelledFn        isCancelled,
   List<String>?                 cidrFilter,
+  List<int>                     ports = kCfDefaultPorts,
   CfValidationMode              validationMode = CfValidationMode.wsProbe,
-  int                           tries          = 4,    // SENPAI-SYNC: SenPai default = 4
-  double                        maxProbesPerSec = 0,   // SENPAI-SYNC: rate limit (0 = unlimited)
+  int                           tries          = 4,
+  double                        maxProbesPerSec = 0,
   CfSortMode                    sortMode       = CfSortMode.avg,
+  void Function(String line)?   onLiveLog,
 }) async {
-  // ── Prepare IP list ────────────────────────────────────────────────────────
   final List<String> scanIps = ips.isNotEmpty
       ? ips
       : sampleCfIps(count: sampleCount, cidrFilter: cidrFilter);
+
+  final probePorts = ports.isEmpty ? [443] : ports;
+  final targets = <({String ip, int port})>[];
+  for (final ip in scanIps) {
+    for (final port in probePorts) {
+      targets.add((ip: ip, port: port));
+    }
+  }
 
   // ── Derive WS probe settings from config ──────────────────────────────────
   // requireWs = true ONLY for actual WebSocket transport.
@@ -290,56 +308,59 @@ Future<List<CfPhase2Result>> runCfXrayScanner({
   // ── Phase 1: multi-try CF probe — SENPAI-SYNC ─────────────────────────────
   final phase1Results = <CfPhase1Result>[];
   int p1Done = 0;
-  final total1 = scanIps.length;
+  final total1 = targets.length;
 
   final sem = _Semaphore(concurrency);
-  // Rate limiter — mirrors SenPai rate.Limiter
   final rateLimiter = maxProbesPerSec > 0
       ? _RateLimiter(maxProbesPerSec) : null;
 
-  await Future.wait(scanIps.map((ip) async {
+  final probeSni = config != null && config.effectiveSni.isNotEmpty
+      ? config.effectiveSni
+      : 'speed.cloudflare.com';
+
+  await Future.wait(targets.map((t) async {
     if (isCancelled()) return;
     await sem.acquire();
     try {
       if (isCancelled()) return;
       if (rateLimiter != null) await rateLimiter.wait();
 
-      // SENPAI-SYNC: multi-try probe (tries=4 default)
       final multi = await cfHttpProbeMulti(
-        ip,
-        tries:    tries,
+        t.ip,
+        sni: probeSni,
+        port: t.port,
+        tries: tries,
         budgetMs: timeoutMs,
       );
 
-      // WS probe — only on confirmed CF edges
       bool? wsOk;
-      if (multi.isCloudflareEdge) {
+      if (multi.isHealthy(port: t.port)) {
         if (requireWs) {
-          // WS transport: do WebSocket upgrade probe
           wsOk = await cfWsProbe(
-            ip,
-            sni:          wsSni,
-            wsHost:       wsHost,
-            wsPath:       wsPath,
+            t.ip,
+            sni: wsSni,
+            wsHost: wsHost,
+            wsPath: wsPath,
             totalBudgetMs: timeoutMs,
           );
-        } else if (config != null) {
-          // XHTTP / gRPC / TCP / splithttp: HTTP edge check is sufficient
-          // No WS upgrade probe — it would always fail on non-WS endpoints
-          wsOk = null;
-        } else {
-          // No config: default WS probe to speed.cloudflare.com
-          wsOk = await cfWsProbe(ip, totalBudgetMs: timeoutMs);
+        } else if (config == null) {
+          wsOk = await cfWsProbe(t.ip, totalBudgetMs: timeoutMs);
         }
       }
 
-      // Build result using IsHealthy() logic
       final r = CfPhase1Result.fromMulti(
-        multi, ip, wsOk: wsOk, requireWs: requireWs,
+        multi,
+        t.ip,
+        port: t.port,
+        wsOk: wsOk,
+        requireWs: requireWs,
       );
       phase1Results.add(r);
       p1Done++;
       onPhase1Progress(r, p1Done, total1);
+      if (r.isEdge) {
+        onLiveLog?.call('${t.ip}:${t.port} colo=${r.colo} avg=${r.avgMs.toStringAsFixed(0)}ms');
+      }
     } finally {
       sem.release();
     }
@@ -355,33 +376,42 @@ Future<List<CfPhase2Result>> runCfXrayScanner({
         )).toList();
   }
 
-  // ── Collect CF edge IPs — healthy ones sorted by sortMode ─────────────────
   final List<CfPhase1Result> edgeIps =
       sortPhase1(phase1Results.where((r) => r.isEdge).toList(), sortMode);
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // MODE B: Xray binary deep validation
-  // ══════════════════════════════════════════════════════════════════════════
-  if (validationMode == CfValidationMode.xrayBinary) {
+  // Real xray-core: desktop only (Windows/Linux/macOS). Android uses SenPai-like TLS/WS Phase 2.
+  final bool desktop = Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+  final useXray = config != null &&
+      desktop &&
+      await XrayBinaryService.instance.isAvailable();
+
+  if (useXray) {
     // SENPAI-SYNC RunList: re-validate top edges with 10s timeout floor
     final validateTimeoutMs = timeoutMs < 10000 ? 10000 : timeoutMs;
 
     final phase2Results = <CfPhase2Result>[];
     int p2Done = 0;
-    final total2 = edgeIps.length;
+    final topEdges = edgeIps.take(topN > 0 ? topN : edgeIps.length).toList();
+    final total2 = topEdges.length;
     final xraySem = _Semaphore(concurrency < 3 ? concurrency : 3);
 
-    await Future.wait(edgeIps.map((p1) async {
+    await Future.wait(topEdges.map((p1) async {
       if (isCancelled()) return;
       await xraySem.acquire();
       try {
         if (isCancelled()) return;
+        final swapped = config!.withAddress(p1.ip, newPort: p1.port);
         final validation = await validateConfig(
-          config, p1.ip, timeoutMs: validateTimeoutMs);
+          swapped, p1.ip, timeoutMs: validateTimeoutMs);
         final r = CfPhase2Result(phase1: p1, validation: validation);
         phase2Results.add(r);
         p2Done++;
         onPhase2Progress(r, p2Done, total2);
+        if (validation.success) {
+          onLiveLog?.call(
+              '✓ ${p1.ip}:${p1.port} ${validation.throughputMbps.toStringAsFixed(1)}Mbps '
+              'lat=${validation.latencyMs.toStringAsFixed(0)}ms');
+        }
       } finally {
         xraySem.release();
       }
@@ -391,39 +421,59 @@ Future<List<CfPhase2Result>> runCfXrayScanner({
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // MODE A: WS probe validation
+  // Phase 2 without xray (Android + fallback): top-N + TLS/WS validation
   // ══════════════════════════════════════════════════════════════════════════
-  final List<CfPhase1Result> validated;
+  List<CfPhase1Result> validated;
   if (requireWs) {
-    validated = phase1Results
-        .where((r) => r.isEdge && r.wsOk == true)
-        .toList();
+    validated = edgeIps.where((r) => r.wsOk == true).toList();
   } else {
-    validated = phase1Results.where((r) => r.isEdge).toList();
+    validated = List<CfPhase1Result>.from(edgeIps);
   }
 
-  // SENPAI-SYNC sort by selected mode
-  final sortedValidated = sortPhase1(validated, sortMode);
-
+  final topEdges = validated.take(topN > 0 ? topN : validated.length).toList();
   final phase2Results = <CfPhase2Result>[];
-  for (int i = 0; i < sortedValidated.length; i++) {
-    if (isCancelled()) break;
-    final p1 = sortedValidated[i];
-    final r = CfPhase2Result(
-      phase1: p1,
-      validation: XrayValidationResult(
-        ip:        p1.ip,
-        port:      config.port,
-        success:   true,
-        latencyMs: p1.avgMs,
-        transport: config.network,
-      ),
-    );
-    phase2Results.add(r);
-    onPhase2Progress(r, i + 1, sortedValidated.length);
-  }
+  final p2Sem = _Semaphore(desktop ? 3 : 8);
+  int p2Done = 0;
+  final total2 = topEdges.length;
 
-  return phase2Results;
+  await Future.wait(topEdges.map((p1) async {
+    if (isCancelled()) return;
+    await p2Sem.acquire();
+    try {
+      if (isCancelled()) return;
+      final swapped = config!.withAddress(p1.ip, newPort: p1.port);
+      final validation = await validateConfig(
+        swapped,
+        p1.ip,
+        timeoutMs: timeoutMs < 10000 ? 10000 : timeoutMs,
+      );
+      final ok = validation.success &&
+          (!requireWs || p1.wsOk == true);
+      final v = XrayValidationResult(
+        ip: p1.ip,
+        port: p1.port,
+        success: ok,
+        latencyMs: validation.latencyMs > 0 ? validation.latencyMs : p1.avgMs,
+        throughputKBs: validation.throughputKBs,
+        transport: config.network,
+        error: ok ? '' : validation.error,
+        usedRealXray: validation.usedRealXray,
+      );
+      final r = CfPhase2Result(phase1: p1, validation: v);
+      phase2Results.add(r);
+      p2Done++;
+      onPhase2Progress(r, p2Done, total2);
+      if (ok) {
+        onLiveLog?.call(
+            '✓ ${p1.ip}:${p1.port} lat=${v.latencyMs.toStringAsFixed(0)}ms '
+            '${desktop ? "" : "(TLS)"}');
+      }
+    } finally {
+      p2Sem.release();
+    }
+  }));
+
+  return sortPhase2(phase2Results, sortMode);
 }
 
 // ─── Simple semaphore ─────────────────────────────────────────────────────────

@@ -1,14 +1,15 @@
-// lib/xray/xray_validator.dart
-// ─── Xray config validator ────────────────────────────────────────────────────
-// Xray binary mode removed — uses TLS connectivity check only.
+// Xray config validator — real xray-core when available, TLS fallback otherwise.
 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'config_parser.dart';
+import 'xray_process_runner.dart';
+import '../services/xray_binary_service.dart';
 
-/// Result of validating a single config against an IP.
+export 'xray_process_runner.dart' show XrayRunResult;
+
 class XrayValidationResult {
   final String ip;
   final int port;
@@ -18,6 +19,7 @@ class XrayValidationResult {
   final String transport;
   final String error;
   final int retries;
+  final bool usedRealXray;
 
   const XrayValidationResult({
     required this.ip,
@@ -28,25 +30,67 @@ class XrayValidationResult {
     this.transport = '',
     this.error = '',
     this.retries = 0,
+    this.usedRealXray = false,
   });
 
-  @override
-  String toString() =>
-      'XrayValidationResult(ip=$ip, success=$success, latency=${latencyMs.toStringAsFixed(0)}ms, '
-      'speed=${throughputKBs.toStringAsFixed(0)}KB/s, err=$error)';
+  double get throughputMbps => (throughputKBs * 8) / 1024;
+
+  factory XrayValidationResult.fromRun(XrayRunResult r, {bool usedRealXray = true}) {
+    return XrayValidationResult(
+      ip: r.ip,
+      port: r.port,
+      success: r.success,
+      latencyMs: r.latencyMs,
+      throughputKBs: r.throughputKBs,
+      transport: r.transport,
+      error: r.error,
+      retries: r.retries,
+      usedRealXray: usedRealXray,
+    );
+  }
 }
 
 const _defaultTimeoutMs = 15000;
 
-/// Validates a config by swapping in [ip] as the endpoint address.
-/// Uses TLS connectivity check (no xray binary required).
 Future<XrayValidationResult> validateConfig(
   XrayConfig cfg,
   String ip, {
   int timeoutMs = _defaultTimeoutMs,
 }) async {
+  if (await XrayBinaryService.instance.isAvailable()) {
+    var res = await runXrayValidation(cfg, ip, timeoutMs: timeoutMs);
+    if (!res.success) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      final res2 = await runXrayValidation(cfg, ip, timeoutMs: timeoutMs);
+      if (res2.success) {
+        return XrayValidationResult.fromRun(
+          XrayRunResult(
+            ip: res2.ip,
+            port: res2.port,
+            success: true,
+            latencyMs: res2.latencyMs,
+            throughputKBs: res2.throughputKBs,
+            transport: res2.transport,
+            retries: 1,
+          ),
+        );
+      }
+      return XrayValidationResult.fromRun(
+        XrayRunResult(
+          ip: res.ip,
+          port: res.port,
+          success: false,
+          error: res2.error.isNotEmpty ? res2.error : res.error,
+          transport: res.transport,
+          retries: 1,
+        ),
+      );
+    }
+    return XrayValidationResult.fromRun(res);
+  }
+
   final swapped = cfg.withAddress(ip);
-  XrayValidationResult res = await _validateWithTls(swapped, timeoutMs: timeoutMs);
+  var res = await _validateWithTls(swapped, timeoutMs: timeoutMs);
   if (!res.success) {
     await Future.delayed(const Duration(milliseconds: 500));
     final res2 = await _validateWithTls(swapped, timeoutMs: timeoutMs);
@@ -59,6 +103,7 @@ Future<XrayValidationResult> validateConfig(
         throughputKBs: res2.throughputKBs,
         transport: res2.transport,
         retries: 1,
+        usedRealXray: false,
       );
     }
     return XrayValidationResult(
@@ -68,76 +113,56 @@ Future<XrayValidationResult> validateConfig(
       transport: res.transport,
       error: res.error,
       retries: 1,
+      usedRealXray: false,
     );
   }
   return res;
 }
 
-// ─── Lightweight TLS check (no xray binary) ──────────────────────────────────
-
 Future<XrayValidationResult> _validateWithTls(
   XrayConfig cfg, {
   int timeoutMs = _defaultTimeoutMs,
 }) async {
-  Socket? rawSock;
-  SecureSocket? tls;
+  final sni = cfg.effectiveSni;
+  final port = cfg.port;
+  final sw = Stopwatch()..start();
   try {
-    final start = DateTime.now();
-    rawSock = await Socket.connect(
+    final sock = await Socket.connect(
       cfg.address,
-      cfg.port,
-      timeout: Duration(milliseconds: timeoutMs ~/ 4),
+      port,
+      timeout: Duration(milliseconds: timeoutMs),
     );
-    tls = await SecureSocket.secure(
-      rawSock,
-      host: cfg.effectiveSni,
-      onBadCertificate: (_) => true,
-    ).timeout(Duration(milliseconds: timeoutMs ~/ 2));
-
-    tls.write(
-      'GET /cdn-cgi/trace HTTP/1.1\r\n'
-      'Host: ${cfg.effectiveSni}\r\n'
-      'User-Agent: MidONe/1.0\r\n'
-      'Connection: close\r\n\r\n',
-    );
-
-    final buf = StringBuffer();
-    final completer = Completer<void>();
-    final sub = tls.listen(
-      (chunk) {
-        buf.write(utf8.decode(chunk, allowMalformed: true));
-        if (buf.length > 2048 && !completer.isCompleted) completer.complete();
-      },
-      onDone: () { if (!completer.isCompleted) completer.complete(); },
-      onError: (_) { if (!completer.isCompleted) completer.complete(); },
-    );
-    await completer.future
-        .timeout(Duration(milliseconds: timeoutMs ~/ 4))
-        .catchError((_) {});
-    await sub.cancel();
-
-    final latency = DateTime.now().difference(start).inMicroseconds / 1000.0;
-    final body = buf.toString();
-    final isCf = body.contains('colo=');
-
+    if (cfg.security == 'tls' || cfg.security == 'reality') {
+      final tls = await SecureSocket.secure(
+        sock,
+        host: sni,
+        onBadCertificate: (_) => cfg.insecure,
+      ).timeout(Duration(milliseconds: timeoutMs));
+      await tls.close();
+      tls.destroy();
+    } else {
+      await sock.close();
+      sock.destroy();
+    }
+    sw.stop();
     return XrayValidationResult(
       ip: cfg.address,
-      port: cfg.port,
-      success: isCf,
-      latencyMs: latency,
+      port: port,
+      success: true,
+      latencyMs: sw.elapsedMilliseconds.toDouble(),
       transport: cfg.network,
-      error: isCf ? '' : 'Not a CF edge or config mismatch',
+      usedRealXray: false,
     );
   } catch (e) {
+    sw.stop();
     return XrayValidationResult(
       ip: cfg.address,
-      port: cfg.port,
+      port: port,
       success: false,
+      latencyMs: sw.elapsedMilliseconds.toDouble(),
       transport: cfg.network,
       error: e.toString(),
+      usedRealXray: false,
     );
-  } finally {
-    try { tls?.destroy(); } catch (_) {}
-    try { rawSock?.destroy(); } catch (_) {}
   }
 }
