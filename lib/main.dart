@@ -572,7 +572,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _startBatchTimer() {
     _batchTimer?.cancel();
-    _batchTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
+    _batchTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
       if (!mounted) { _batchTimer?.cancel(); return; }
       if (_pendingResults.isEmpty) return;
       setState(() {
