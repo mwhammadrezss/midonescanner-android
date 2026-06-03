@@ -11,7 +11,7 @@
 
 <br/>
 
-[**⬇️ دانلود APK**](https://github.com/mwhammadrezss/midonescanner-android/releases/download/v8.1.0/MidONeScannerV8.1.0.apk) &nbsp;·&nbsp; [**📣 کانال تلگرام**](https://t.me/mmdrlx)
+[**⬇️ دانلود APK**](https://github.com/mwhammadrezss/midonescanner-android/releases/download/v8.1.0/MidONeScannerV8.1.0.apk) &nbsp;·&nbsp; [**🖥️ دانلود Windows**](https://github.com/mwhammadrezss/midonescanner-android/releases/download/v8.1.0/MidONe-Scanner-Windows-v8.1.0.zip) &nbsp;·&nbsp; [**📣 کانال تلگرام**](https://t.me/mmdrlx)
 
 </div>
 
@@ -132,6 +132,17 @@ DNS Resolve
 ```
 
 ---
+
+---
+
+## 🖥️ نصب ویندوز
+
+```
+1. دکمه "دانلود Windows" رو بزن
+2. فایل ZIP رو Extract کن
+3. midone_scanner.exe رو اجرا کن
+   (اگه Windows Defender هشدار داد → More info → Run anyway)
+```
 
 ## 🚀 Getting Started
 
