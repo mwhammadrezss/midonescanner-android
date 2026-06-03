@@ -14,6 +14,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'engine/scanner_engine.dart';
+import 'engine/concurrency_engine.dart';
 import 'engine/probe_engine.dart' show kDeepSniPresets;
 import 'models/scan_result.dart' show ScanPhase, IpTier;
 import 'utils/ip_utils.dart' show validateAndExtractIps, isPrivateOrReserved;
@@ -683,8 +684,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (_cancelled) break;
         final batch = ips.skip(batchStart).take(batchSize).toList();
 
+        // Cap parallel TCP probes per batch (avoids socket exhaustion on large lists)
+        const parallelCap = 40;
+        final sem = Semaphore(parallelCap);
         final results = await Future.wait(
-          batch.map((ip) => probeOne(ip)).toList(),
+          batch.map((ip) async {
+            await sem.acquire();
+            try {
+              return await probeOne(ip);
+            } finally {
+              sem.release();
+            }
+          }),
           eagerError: false,
         );
 
@@ -775,11 +786,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       isCfScan = rangeCfMode;
       normalSniOverride = rangeCfMode ? 'speed.cloudflare.com' : null;
     } else {
-      // CDN mode: normal + deep both use speed.cloudflare.com as SNI
-      // FIX: www.google.com SNI fails on CF edge IPs (104.17.x.x etc.) — CF edge
-      // only accepts its own SNIs. Using speed.cloudflare.com works for all CF IPs
-      // and still allows non-CF IPs to be probed (they'll fail TLS — correctly dead).
-      isCfScan = _cdnSubMode == CdnSubMode.deep;
+      // CDN mode: speed.cloudflare.com SNI for CF/CDN edges; not CF-tab WS/HTTP gate.
+      isCfScan = false;
       normalSniOverride = 'speed.cloudflare.com';
     }
 
@@ -790,28 +798,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       deepSnis: deepSnis,
       normalSniOverride: normalSniOverride,
       isCfScan: isCfScan,
+      onPrefilterProgress: (checked, total) {
+        if (!mounted) return;
+        setState(() {
+          _done = checked;
+          _total = total;
+          _statusText = 'Pre-filtering ${(checked / total * 100).round()}%...';
+        });
+      },
       onPrefilterDone: (liveCount, totalCount) {
         if (!mounted) return;
         setState(() {
           _prefilterLive  = liveCount;
           _prefilterTotal = totalCount;
           _prefiltering   = false;
-          _total          = liveCount > 0 ? liveCount : _total;
-          // FIX(prefilter-zero): never zero _total if onProgress already set it.
-          // If liveCount==0 (last isolate had no live IPs), keep existing _total.
-          _statusText     = 'Scanning $liveCount live IPs...';
+          _total = liveCount > 0 ? liveCount : totalCount;
+          _statusText = liveCount > 0
+              ? 'Scanning $liveCount live IPs...'
+              : 'No live IPs on port 443 — try fewer IPs or Deep scan';
         });
       },
       onProgress: (done, total, result) {
         if (!mounted) return;
-        // start event (done==0): just reset totals, no result to add
-        if (done > 0) _pendingResults.add(result);
-        // setState immediately so progress bar updates on every IP
+        _pendingResults.add(result);
         setState(() {
           _done = done;
-          // FIX(total-shrink): _total can only grow — never let onProgress shrink it.
-          if (total > _total) _total = total;
-          if (done > 0 && _total > 0) {
+          if (total > 0) _total = total;
+          if (_total > 0) {
             final pct = (done / _total * 100).round();
             _statusText = 'Scanning $pct%...';
           }
@@ -833,16 +846,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     ).then((results) {
       if (!mounted) return;
       _stopBatchTimer();
+      final merged = results.isNotEmpty
+          ? results
+          : (_results.isNotEmpty ? _results : _pendingResults);
       setState(() {
-        _results = results;
+        if (results.isNotEmpty) _results = results;
         _scanning = false;
         _prefiltering = false;
+        _done = merged.length;
+        _total = math.max(_total, merged.length);
         _displayDirty = true;
-        // Recount stats from final results list to ensure alignment with actual data
-        _okCount   = results.where((r) => r.tier == IpTier.excellent || r.tier == IpTier.good).length;
-        _thrCount  = results.where((r) => r.tier == IpTier.usable || r.tier == IpTier.weak).length;
-        _failCount = results.where((r) => r.tier == IpTier.dead).length;
-        _statusText = 'Done! ${results.where((r) => r.isAlive).length} results';
+        _okCount   = merged.where((r) => r.tier == IpTier.excellent || r.tier == IpTier.good).length;
+        _thrCount  = merged.where((r) => r.tier == IpTier.usable || r.tier == IpTier.weak).length;
+        _failCount = merged.where((r) => r.tier == IpTier.dead).length;
+        final alive = merged.where((r) => r.isAlive).length;
+        _statusText = alive > 0
+            ? 'Done! $alive usable / ${merged.length} scanned'
+            : 'Done! 0 usable — ${merged.length} scanned (check IPs or try Deep)';
       });
       if (results.isNotEmpty) {
         _showSnack('✓ Done! ${results.where((r) => r.isAlive).length} results found');
