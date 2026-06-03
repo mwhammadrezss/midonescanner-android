@@ -6,12 +6,12 @@
 ### اسکنر حرفه‌ای آی‌پی تمیز
 ##### CDN &nbsp;·&nbsp; CLOUDFLARE &nbsp;·&nbsp; DNS
 [![Release](https://img.shields.io/github/v/release/mwhammadrezss/midonescanner-android?label=آخرین%20نسخه&style=flat-square&color=brightgreen)](https://github.com/mwhammadrezss/midonescanner-android/releases/latest)
-[![Platform](https://img.shields.io/badge/Platform-Android-green?style=flat-square&logo=android)](https://github.com/mwhammadrezss/midonescanner-android/releases/latest)
+[![Platform](https://img.shields.io/badge/Platform-Android%20%7C%20Windows-green?style=flat-square&logo=android)](https://github.com/mwhammadrezss/midonescanner-android/releases/latest)
 [![Telegram](https://img.shields.io/badge/Telegram-@mmdrlx-blue?style=flat-square&logo=telegram)](https://t.me/mmdrlx)
 
 <br/>
 
-[**⬇️ دانلود APK**](https://github.com/mwhammadrezss/midonescanner-android/releases/download/v7.0.1/MidONeScannerV7.0.1.apk) &nbsp;·&nbsp; [**📣 کانال تلگرام**](https://t.me/mmdrlx)
+[**⬇️ دانلود APK**](https://github.com/mwhammadrezss/midonescanner-android/releases/download/v8.1.0/MidONeScannerV8.1.0.apk) &nbsp;·&nbsp; [**📣 کانال تلگرام**](https://t.me/mmdrlx)
 
 </div>
 
@@ -154,7 +154,7 @@ DNS Resolve
 
 | Spec | Value |
 |------|-------|
-| Platform | Android 5.0+ |
+| Platform | Android 5.0+ &nbsp;&middot;&nbsp; Windows 10/11 |
 | Framework | Flutter / Dart |
 | Protocol | TLS 1.2/1.3 over TCP:443 |
 | Threads | 20 parallel threads |
