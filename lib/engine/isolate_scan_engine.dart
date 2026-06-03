@@ -452,7 +452,7 @@ Future<List<ScanResult>> runIsolateScanEngine(
         topResults.addAll(msg.results);
         totalDone += msg.results.length;
         if (onProgress != null && msg.results.isNotEmpty) {
-          onProgress(totalDone, totalLive > 0 ? totalLive : totalIps, msg.results.last);
+          onProgress(totalDone, prefilterReported ? totalLive : totalIps, msg.results.last);
         }
       } else if (msg is _WorkerDone) {
         finishWorker();
